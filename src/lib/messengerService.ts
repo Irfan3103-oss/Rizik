@@ -20,7 +20,14 @@ import {
   type Unsubscribe,
 } from 'firebase/firestore';
 import { getDownloadURL, ref as storageRef, uploadBytes } from 'firebase/storage';
-import { db, handleFirestoreError, OperationType, storage } from '../firebase';
+import {
+  db,
+  type FirestoreListenerError,
+  handleFirestoreError,
+  OperationType,
+  parseFirestoreListenerError,
+  storage,
+} from '../firebase';
 import { FOOD_CATEGORY_IMAGES } from '../data/images';
 import {
   ALL_DEMO_PERSONAS_MAP,
@@ -268,7 +275,8 @@ function parseDirectoryRole(raw: unknown): DirectoryRole {
 export function subscribeDiscoverableDirectory(
   myUid: string,
   pageLimit: number,
-  onUsers: (entries: UserDirectoryEntry[], hasMore: boolean) => void
+  onUsers: (entries: UserDirectoryEntry[], hasMore: boolean) => void,
+  onError?: (err: FirestoreListenerError) => void
 ): Unsubscribe {
   const q = query(
     collection(db, 'userDirectory'),
@@ -341,7 +349,7 @@ export function subscribeDiscoverableDirectory(
       onUsers(list, snap.docs.length >= pageLimit);
     },
     (error) => {
-      handleFirestoreError(error, OperationType.LIST, 'userDirectory');
+      onError?.(parseFirestoreListenerError(error, OperationType.LIST, 'userDirectory'));
     }
   );
 }
@@ -350,9 +358,11 @@ export function subscribeDiscoverableDirectory(
 
 export function subscribeMyBlockedUsers(
   myUid: string,
-  onBlocks: (blockedUids: Set<string>, blockedList: { uid: string; name: string; handle?: string }[]) => void
+  onBlocks: (blockedUids: Set<string>, blockedList: { uid: string; name: string; handle?: string }[]) => void,
+  onError?: (err: FirestoreListenerError) => void
 ): Unsubscribe {
-  const q = collection(db, 'users', sanitizeId(myUid), 'blocked');
+  const safeUid = sanitizeId(myUid);
+  const q = collection(db, 'users', safeUid, 'blocked');
   return onSnapshot(
     q,
     (snap) => {
@@ -371,7 +381,7 @@ export function subscribeMyBlockedUsers(
       onBlocks(set, items);
     },
     (error) => {
-      handleFirestoreError(error, OperationType.LIST, `users/${myUid}/blocked`);
+      onError?.(parseFirestoreListenerError(error, OperationType.LIST, `users/${safeUid}/blocked`));
     }
   );
 }
@@ -439,48 +449,70 @@ export async function reportUserInFirestore(params: {
 
 // --- Isolated Client-Side Demo Persona Conversations (Strictly Under users/{uid}/demo*) ---
 
-const inFlightStarterSeed = new Map<string, Promise<void>>();
+export interface StarterConvSeedResult {
+  status: 'already_present' | 'created' | 'repaired' | 'error';
+  error?: string;
+}
+
+const inFlightStarterSeed = new Map<string, Promise<StarterConvSeedResult>>();
 
 export function seedStarterDemoConversationsOnce(
   fbUser: FirebaseUser,
-  _appUser: User
-): Promise<void> {
-  const existing = inFlightStarterSeed.get(fbUser.uid);
-  if (existing) return existing;
+  _appUser: User,
+  forceCheck = false
+): Promise<StarterConvSeedResult> {
+  if (!forceCheck) {
+    const existing = inFlightStarterSeed.get(fbUser.uid);
+    if (existing) return existing;
+  }
 
-  const p = doSeedStarterDemoConversationsOnce(fbUser).finally(() => {
+  const p = doSeedStarterDemoConversationsOnce(fbUser, forceCheck).finally(() => {
     inFlightStarterSeed.delete(fbUser.uid);
   });
   inFlightStarterSeed.set(fbUser.uid, p);
   return p;
 }
 
-async function doSeedStarterDemoConversationsOnce(fbUser: FirebaseUser): Promise<void> {
+async function doSeedStarterDemoConversationsOnce(
+  fbUser: FirebaseUser,
+  forceCheck = false
+): Promise<StarterConvSeedResult> {
   const uid = sanitizeId(fbUser.uid);
   const localSeedFlag = `rizik_demo_team_v2_${uid}`;
-  try {
-    if (localStorage.getItem(localSeedFlag) === '1') {
-      return;
+  if (!forceCheck) {
+    try {
+      if (localStorage.getItem(localSeedFlag) === '1') {
+        return { status: 'already_present' };
+      }
+    } catch {
+      // Ignore storage issues
     }
-  } catch {
-    // Ignore storage issues
   }
 
   const convId = RIZIK_TEAM_PERSONA.id;
   const teamConvRef = doc(db, 'users', uid, 'demoConversations', convId);
 
+  let convExists = false;
+  let existingMsgCount = 0;
   try {
-    const existingConv = await getDoc(teamConvRef);
-    if (existingConv.exists()) {
+    const [existingConv, existingMsgs] = await Promise.all([
+      getDoc(teamConvRef),
+      getDocs(query(collection(db, 'users', uid, 'demoMessages'), where('conversationId', '==', convId), limit(5))),
+    ]);
+    convExists = existingConv.exists();
+    existingMsgCount = existingMsgs.size;
+    if (convExists && existingMsgCount > 0) {
       try {
         localStorage.setItem(localSeedFlag, '1');
       } catch {
         // Ignore
       }
-      return;
+      return { status: 'already_present' };
     }
-  } catch {
-    return;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn('[messengerService] Could not inspect starter demo_team thread:', err);
+    return { status: 'error', error: msg };
   }
 
   const welcomeMsgs = [
@@ -490,40 +522,44 @@ async function doSeedStarterDemoConversationsOnce(fbUser: FirebaseUser): Promise
 
   try {
     const batch = writeBatch(db);
-    batch.set(teamConvRef, {
-      personaId: RIZIK_TEAM_PERSONA.id,
-      personaName: RIZIK_TEAM_PERSONA.displayName,
-      personaHandle: RIZIK_TEAM_PERSONA.handle,
-      personaRole: RIZIK_TEAM_PERSONA.role,
-      personaArea: RIZIK_TEAM_PERSONA.area,
-      personaAvatar: null,
-      personaVerified: true,
-      isOfficial: true,
-      lastMessage: clampStr(welcomeMsgs[1], 500),
-      lastMessageType: 'text',
-      lastMessageSenderId: RIZIK_TEAM_PERSONA.id,
-      lastMessageAt: serverTimestamp(),
-      unreadCount: 1,
-      isMuted: false,
-      isArchived: false,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    });
-
-    welcomeMsgs.forEach((text, index) => {
-      const msgId = sanitizeId(`demo_team_welcome_${index}`);
-      batch.set(doc(db, 'users', uid, 'demoMessages', msgId), {
-        conversationId: convId,
+    if (!convExists) {
+      batch.set(teamConvRef, {
         personaId: RIZIK_TEAM_PERSONA.id,
-        senderId: RIZIK_TEAM_PERSONA.id,
-        senderName: RIZIK_TEAM_PERSONA.displayName,
-        text: clampStr(text, 2000),
-        messageType: 'text',
-        reactions: {},
-        isDemoAutoReply: true,
+        personaName: RIZIK_TEAM_PERSONA.displayName,
+        personaHandle: RIZIK_TEAM_PERSONA.handle,
+        personaRole: RIZIK_TEAM_PERSONA.role,
+        personaArea: RIZIK_TEAM_PERSONA.area,
+        personaAvatar: null,
+        personaVerified: true,
+        isOfficial: true,
+        lastMessage: clampStr(welcomeMsgs[1], 500),
+        lastMessageType: 'text',
+        lastMessageSenderId: RIZIK_TEAM_PERSONA.id,
+        lastMessageAt: serverTimestamp(),
+        unreadCount: 1,
+        isMuted: false,
+        isArchived: false,
         createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
       });
-    });
+    }
+
+    if (existingMsgCount === 0) {
+      welcomeMsgs.forEach((text, index) => {
+        const msgId = sanitizeId(`demo_team_welcome_${index}`);
+        batch.set(doc(db, 'users', uid, 'demoMessages', msgId), {
+          conversationId: convId,
+          personaId: RIZIK_TEAM_PERSONA.id,
+          senderId: RIZIK_TEAM_PERSONA.id,
+          senderName: RIZIK_TEAM_PERSONA.displayName,
+          text: clampStr(text, 2000),
+          messageType: 'text',
+          reactions: {},
+          isDemoAutoReply: true,
+          createdAt: serverTimestamp(),
+        });
+      });
+    }
 
     await batch.commit();
 
@@ -540,8 +576,11 @@ async function doSeedStarterDemoConversationsOnce(fbUser: FirebaseUser): Promise
     } catch {
       // Ignore
     }
+    return { status: convExists ? 'repaired' : 'created' };
   } catch (err) {
-    console.warn('Starter demo_team seed skipped:', err);
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn('[messengerService] Starter demo_team seed skipped:', err);
+    return { status: 'error', error: msg };
   }
 }
 
@@ -667,7 +706,8 @@ export async function getOrCreateDemoPersonaConversation(
 
 export function subscribeMyDemoConversations(
   myUid: string,
-  onConversations: (conversations: Conversation[]) => void
+  onConversations: (conversations: Conversation[]) => void,
+  onError?: (err: FirestoreListenerError) => void
 ): Unsubscribe {
   const safeUid = sanitizeId(myUid);
   const q = collection(db, 'users', safeUid, 'demoConversations');
@@ -756,7 +796,13 @@ export function subscribeMyDemoConversations(
       onConversations(list);
     },
     (error) => {
-      handleFirestoreError(error, OperationType.LIST, `users/${safeUid}/demoConversations`);
+      onError?.(
+        parseFirestoreListenerError(
+          error,
+          OperationType.LIST,
+          `users/${safeUid}/demoConversations`
+        )
+      );
     }
   );
 }
@@ -765,7 +811,8 @@ export function subscribeDemoConversationMessages(
   myUid: string,
   convId: string,
   pageSize: number,
-  onMessages: (messages: ChatMessage[], hasMore: boolean) => void
+  onMessages: (messages: ChatMessage[], hasMore: boolean) => void,
+  onError?: (err: FirestoreListenerError) => void
 ): Unsubscribe {
   const safeUid = sanitizeId(myUid);
   const safeConvId = sanitizeId(convId);
@@ -788,7 +835,13 @@ export function subscribeDemoConversationMessages(
       onMessages(all.slice(-pageSize), hasMore);
     },
     (error) => {
-      handleFirestoreError(error, OperationType.LIST, `users/${safeUid}/demoMessages`);
+      onError?.(
+        parseFirestoreListenerError(
+          error,
+          OperationType.LIST,
+          `users/${safeUid}/demoMessages`
+        )
+      );
     }
   );
 }
@@ -1124,7 +1177,8 @@ export function subscribeMyFirestoreConversations(
   myUid: string,
   getBlockedSet: () => Set<string>,
   getDirectoryMap: () => Map<string, UserDirectoryEntry>,
-  onConversations: (conversations: Conversation[]) => void
+  onConversations: (conversations: Conversation[]) => void,
+  onError?: (err: FirestoreListenerError) => void
 ): Unsubscribe {
   const safeUid = sanitizeId(myUid);
   const q = query(collection(db, 'conversations'), where('participants', 'array-contains', safeUid));
@@ -1151,7 +1205,7 @@ export function subscribeMyFirestoreConversations(
       onConversations(mapped);
     },
     (error) => {
-      handleFirestoreError(error, OperationType.LIST, 'conversations');
+      onError?.(parseFirestoreListenerError(error, OperationType.LIST, 'conversations'));
     }
   );
 }
@@ -1479,7 +1533,8 @@ export function subscribeConversationMessages(
   myUid: string,
   peerUid: string | undefined,
   pageSize: number,
-  onMessages: (messages: ChatMessage[], hasMore: boolean) => void
+  onMessages: (messages: ChatMessage[], hasMore: boolean) => void,
+  onError?: (err: FirestoreListenerError) => void
 ): Unsubscribe {
   const safeConvId = sanitizeId(conversationId);
   const safeMyUid = sanitizeId(myUid);
@@ -1517,7 +1572,13 @@ export function subscribeConversationMessages(
         emitFromDocs(snap.docs as { id: string; data: () => Record<string, unknown> }[], true);
       },
       (err) => {
-        handleFirestoreError(err, OperationType.LIST, `conversations/${safeConvId}/messages`);
+        onError?.(
+          parseFirestoreListenerError(
+            err,
+            OperationType.LIST,
+            `conversations/${safeConvId}/messages`
+          )
+        );
       }
     );
   };
@@ -1535,13 +1596,17 @@ export function subscribeConversationMessages(
       emitFromDocs(snap.docs as { id: string; data: () => Record<string, unknown> }[], false);
     },
     (error) => {
-      const msg = error?.message || '';
-      if (msg.includes('index') || error?.code === 'failed-precondition') {
+      const parsed = parseFirestoreListenerError(
+        error,
+        OperationType.LIST,
+        `conversations/${safeConvId}/messages`
+      );
+      if (parsed.isIndexError) {
         activeUnsub();
         attachFallbackListener();
         return;
       }
-      handleFirestoreError(error, OperationType.LIST, `conversations/${safeConvId}/messages`);
+      onError?.(parsed);
     }
   );
 
@@ -1645,7 +1710,7 @@ export async function sendMessengerMessage(params: {
       ? params.conversation.participants.map(sanitizeId)
       : params.conversation.isDemo
         ? [myUid]
-        : [myUid, sanitizeId(params.conversation.peerUid || params.conversation.donorId)];
+        : [myUid, sanitizeId(params.conversation.peerUid || params.conversation.donorId)].sort();
 
   const fsType = mapMessageTypeToFirestore(params.messageType);
   const cleanText =
@@ -1818,6 +1883,7 @@ export async function markConversationUnreadAsDelivered(
 ): Promise<void> {
   const safeConvId = sanitizeId(conversationId);
   const safeMyUid = sanitizeId(myUid);
+  let snap;
   try {
     const q = query(
       collection(db, 'conversations', safeConvId, 'messages'),
@@ -1825,8 +1891,28 @@ export async function markConversationUnreadAsDelivered(
       orderBy('createdAt', 'desc'),
       limit(10)
     );
-    const snap = await getDocs(q);
-    if (snap.empty) return;
+    snap = await getDocs(q);
+  } catch (err) {
+    const parsed = parseFirestoreListenerError(
+      err,
+      OperationType.LIST,
+      `conversations/${safeConvId}/messages`
+    );
+    if (!parsed.isIndexError) return;
+    try {
+      const fallbackQ = query(
+        collection(db, 'conversations', safeConvId, 'messages'),
+        where('participants', 'array-contains', safeMyUid),
+        limit(15)
+      );
+      snap = await getDocs(fallbackQ);
+    } catch {
+      return;
+    }
+  }
+
+  try {
+    if (!snap || snap.empty) return;
     const batch = writeBatch(db);
     let writes = 0;
     snap.docs.forEach((d) => {
@@ -1844,8 +1930,8 @@ export async function markConversationUnreadAsDelivered(
     if (writes > 0) {
       await batch.commit();
     }
-  } catch {
-    // Fallback / non-fatal if composite index is still building or offline
+  } catch (err) {
+    console.warn('[messengerService] Failed to mark unread messages as delivered:', err);
   }
 }
 

@@ -4,11 +4,15 @@ import '../i18n/i18n_provider.dart';
 import '../models/models.dart';
 import '../providers/auth_provider.dart';
 import '../services/api_service.dart';
+import '../services/community_rooms_service.dart';
+import '../services/ensure_account_service.dart';
+import '../services/firestore_error_helper.dart';
 import '../services/firestore_service.dart';
 import '../services/messenger_service.dart';
 import '../theme/palettes.dart';
 import '../theme/theme_provider.dart';
 import '../widgets/admin_chat_sheet.dart';
+import '../widgets/health_check_sheet.dart';
 
 class OnboardingAuthScreen extends StatefulWidget {
   final AuthProvider auth;
@@ -151,7 +155,7 @@ class _OnboardingAuthScreenState extends State<OnboardingAuthScreen> {
         }
       }
     } catch (e) {
-      setState(() => _error = e.toString().replaceFirst('Exception: ', ''));
+      setState(() => _error = formatAuthError(e));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -289,9 +293,7 @@ class _OnboardingAuthScreenState extends State<OnboardingAuthScreen> {
                                     await widget.auth.signInWithGoogle();
                                     widget.onSuccess?.call();
                                   } catch (e) {
-                                    setState(() => _error = e
-                                        .toString()
-                                        .replaceFirst('Exception: ', ''));
+                                    setState(() => _error = formatAuthError(e));
                                   } finally {
                                     if (mounted) setState(() => _busy = false);
                                   }
@@ -463,6 +465,8 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
   late double _radiusKm;
   bool _discoverable = true;
   bool _saving = false;
+  bool _repairing = false;
+  EnsureAccountReport? _repairReport;
   List<BlockedUserEntry> _blockedUsers = [];
   StreamSubscription? _blockedSub;
 
@@ -865,6 +869,124 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    Row(
+                      children: [
+                        Icon(Icons.build_circle_outlined,
+                            color: tokens.primary),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            widget.i18n.t('repair.title'),
+                            style: const TextStyle(
+                                fontSize: 16, fontWeight: FontWeight.w800),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      widget.i18n.t('repair.subtitle'),
+                      style: TextStyle(fontSize: 12, color: tokens.textMuted),
+                    ),
+                    const SizedBox(height: 12),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        FilledButton.icon(
+                          onPressed: _repairing
+                              ? null
+                              : () async {
+                                  setState(() => _repairing = true);
+                                  final report = await widget.auth
+                                      .runEnsureAccount(force: true);
+                                  if (!mounted) return;
+                                  setState(() {
+                                    _repairing = false;
+                                    _repairReport = report ??
+                                        widget.auth.lastEnsureReport;
+                                  });
+                                },
+                          icon: _repairing
+                              ? const SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: Colors.white,
+                                  ),
+                                )
+                              : const Icon(Icons.auto_fix_high_rounded,
+                                  size: 18),
+                          label: Text(_repairing
+                              ? widget.i18n.t('repair.running')
+                              : widget.i18n.t('repair.button')),
+                        ),
+                        OutlinedButton.icon(
+                          onPressed: () => showHealthCheckSheet(
+                            context,
+                            auth: widget.auth,
+                            i18n: widget.i18n,
+                            tokens: tokens,
+                            mode: widget.auth.isAdmin ? 'admin' : 'user',
+                          ),
+                          icon: const Icon(Icons.health_and_safety_outlined,
+                              size: 18),
+                          label: Text(widget.i18n.t('health.runBtn')),
+                        ),
+                      ],
+                    ),
+                    if ((_repairReport ?? widget.auth.lastEnsureReport) !=
+                        null) ...[
+                      const SizedBox(height: 12),
+                      ...(_repairReport ?? widget.auth.lastEnsureReport)!
+                          .steps
+                          .map((step) {
+                        final isErr = step.status == 'error';
+                        final isFixed = step.status == 'fixed';
+                        final color = isErr
+                            ? Colors.red.shade700
+                            : isFixed
+                                ? Colors.blue.shade700
+                                : const Color(0xFF16A34A);
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 6),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Icon(
+                                isErr
+                                    ? Icons.error_outline_rounded
+                                    : isFixed
+                                        ? Icons.auto_fix_high_rounded
+                                        : Icons.check_circle_outline_rounded,
+                                size: 17,
+                                color: color,
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  '${widget.i18n.isBn ? step.labelBn : step.label}: '
+                                  '${widget.i18n.isBn ? step.detailBn : step.detail}',
+                                  style: const TextStyle(fontSize: 12),
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      }),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 14),
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
                     Text(widget.i18n.t('profile.blockedUsers'),
                         style: const TextStyle(
                             fontSize: 16, fontWeight: FontWeight.w800)),
@@ -919,22 +1041,121 @@ class AdminApplicationsScreen extends StatefulWidget {
 class _AdminApplicationsScreenState extends State<AdminApplicationsScreen> {
   List<RestaurantOwnerApplication> _apps = [];
   List<AdminNotificationItem> _alerts = [];
+  FirestoreListenerError? _adminError;
+  bool _seeding = false;
+  DemoSeedProgress? _seedProgress;
+  DemoSeedSummary? _seedSummary;
+  DemoRemoveResult? _removeResult;
   StreamSubscription? _appsSub;
   StreamSubscription? _alertsSub;
 
   @override
   void initState() {
     super.initState();
+    _subscribeAdminStreams();
+  }
+
+  void _subscribeAdminStreams() {
+    _appsSub?.cancel();
+    _alertsSub?.cancel();
     if (widget.auth.isAdmin && widget.auth.isFirebaseSession) {
+      setState(() => _adminError = null);
       _appsSub = FirestoreService.instance
           .watchRestaurantApplications()
-          .listen((list) {
-        if (mounted) setState(() => _apps = list);
-      }, onError: (_) {});
-      _alertsSub =
-          FirestoreService.instance.watchAdminNotifications().listen((list) {
-        if (mounted) setState(() => _alerts = list);
-      }, onError: (_) {});
+          .listen(
+        (list) {
+          if (mounted) {
+            setState(() {
+              _apps = list;
+              _adminError = null;
+            });
+          }
+        },
+        onError: (e) {
+          final parsed = parseFirestoreListenerError(e, 'LIST', 'users');
+          if (mounted) setState(() => _adminError = parsed);
+        },
+      );
+      _alertsSub = FirestoreService.instance.watchAdminNotifications().listen(
+        (list) {
+          if (mounted) setState(() => _alerts = list);
+        },
+        onError: (e) {
+          final parsed =
+              parseFirestoreListenerError(e, 'LIST', 'adminNotifications');
+          if (mounted) setState(() => _adminError ??= parsed);
+        },
+      );
+    }
+  }
+
+  Future<void> _runSeedDemo() async {
+    final adminUid = widget.auth.user?.id;
+    if (adminUid == null || _seeding) return;
+    setState(() {
+      _seeding = true;
+      _seedSummary = null;
+      _removeResult = null;
+      _seedProgress = const DemoSeedProgress(
+        step: 'Starting demo seed...',
+        current: 0,
+        total: 1,
+      );
+    });
+    try {
+      final summary = await CommunityRoomsService.instance.seedAllDemoData(
+        adminUid,
+        onProgress: (p) {
+          if (mounted) setState(() => _seedProgress = p);
+        },
+      );
+      if (mounted) {
+        setState(() {
+          _seedSummary = summary;
+          _seeding = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _seeding = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Seed error: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _runCleanDemo() async {
+    if (_seeding) return;
+    setState(() {
+      _seeding = true;
+      _seedSummary = null;
+      _removeResult = null;
+      _seedProgress = const DemoSeedProgress(
+        step: 'Removing seeded demo data...',
+        current: 0,
+        total: 4,
+      );
+    });
+    try {
+      final result = await CommunityRoomsService.instance.removeAllDemoData(
+        onProgress: (p) {
+          if (mounted) setState(() => _seedProgress = p);
+        },
+      );
+      if (mounted) {
+        setState(() {
+          _removeResult = result;
+          _seeding = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _seeding = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Cleanup error: $e')),
+        );
+      }
     }
   }
 
@@ -991,9 +1212,155 @@ class _AdminApplicationsScreenState extends State<AdminApplicationsScreen> {
       );
     }
 
+    final t = widget.i18n.t;
+    final progress = _seedProgress;
+    final ratio = (progress != null && progress.total > 0)
+        ? (progress.current / progress.total).clamp(0.0, 1.0)
+        : 0.0;
+
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
+        if (_adminError != null)
+          FirestoreErrorBanner(
+            error: _adminError!,
+            i18n: widget.i18n,
+            tokens: widget.tokens,
+            onRetry: _subscribeAdminStreams,
+            onRunHealthCheck: () => showHealthCheckSheet(
+              context,
+              auth: widget.auth,
+              i18n: widget.i18n,
+              tokens: widget.tokens,
+              mode: 'admin',
+            ),
+          ),
+        Card(
+          margin: const EdgeInsets.only(bottom: 16),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(Icons.dataset_linked_rounded,
+                        color: widget.tokens.primary),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        t('admin.seedTitle'),
+                        style: const TextStyle(
+                            fontSize: 16, fontWeight: FontWeight.w800),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  t('admin.seedDesc'),
+                  style: TextStyle(fontSize: 12, color: widget.tokens.textMuted),
+                ),
+                const SizedBox(height: 12),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    FilledButton.icon(
+                      onPressed: _seeding ? null : _runSeedDemo,
+                      icon: const Icon(Icons.cloud_upload_outlined, size: 18),
+                      label: Text(_seeding
+                          ? t('admin.seeding')
+                          : t('admin.seedBtn')),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: _seeding ? null : _runCleanDemo,
+                      icon: const Icon(Icons.cleaning_services_outlined,
+                          size: 18),
+                      label: Text(t('admin.cleanBtn')),
+                    ),
+                    FilledButton.tonalIcon(
+                      onPressed: () => showHealthCheckSheet(
+                        context,
+                        auth: widget.auth,
+                        i18n: widget.i18n,
+                        tokens: widget.tokens,
+                        mode: 'admin',
+                      ),
+                      icon: const Icon(Icons.health_and_safety_outlined,
+                          size: 18),
+                      label: Text(t('admin.healthBtn')),
+                    ),
+                  ],
+                ),
+                if (progress != null && _seeding) ...[
+                  const SizedBox(height: 12),
+                  LinearProgressIndicator(value: ratio),
+                  const SizedBox(height: 6),
+                  Text(
+                    '${progress.step} (${progress.current}/${progress.total})',
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                ],
+                if (_seedSummary != null) ...[
+                  const SizedBox(height: 12),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: widget.tokens.soft,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Personas: ${_seedSummary!.personasCreated} created, '
+                          '${_seedSummary!.personasUpdated} updated '
+                          '(verified in DB: ${_seedSummary!.verifiedPersonasCount})',
+                          style: const TextStyle(
+                              fontSize: 12, fontWeight: FontWeight.w700),
+                        ),
+                        const SizedBox(height: 3),
+                        Text(
+                          'Rooms: ${_seedSummary!.roomsCreated} created, '
+                          '${_seedSummary!.roomsUpdated} updated '
+                          '(verified in DB: ${_seedSummary!.verifiedRoomsCount})',
+                          style: const TextStyle(fontSize: 12),
+                        ),
+                        const SizedBox(height: 3),
+                        Text(
+                          'Messages: ${_seedSummary!.messagesCreated} created, '
+                          '${_seedSummary!.messagesAlreadyExisted} existed '
+                          '(verified in DB: ${_seedSummary!.verifiedMessagesCount})',
+                          style: const TextStyle(fontSize: 12),
+                        ),
+                        if (_seedSummary!.errors.isNotEmpty) ...[
+                          const SizedBox(height: 6),
+                          ..._seedSummary!.errors.map((err) => Text(
+                                'Error [${err.step}] (${err.code}): ${err.message}',
+                                style: TextStyle(
+                                    fontSize: 11, color: Colors.red.shade800),
+                              )),
+                        ],
+                      ],
+                    ),
+                  ),
+                ],
+                if (_removeResult != null) ...[
+                  const SizedBox(height: 10),
+                  Text(
+                    'Removed ${_removeResult!.deletedPersonas} personas, '
+                    '${_removeResult!.deletedMessages} messages, '
+                    '${_removeResult!.deletedRooms} rooms.',
+                    style: const TextStyle(
+                        fontSize: 12, fontWeight: FontWeight.w700),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
         const Text('Restaurant Verification Queue',
             style: TextStyle(fontSize: 19, fontWeight: FontWeight.w800)),
         const SizedBox(height: 10),

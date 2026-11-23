@@ -4,9 +4,11 @@ import '../i18n/i18n_provider.dart';
 import '../models/models.dart';
 import '../providers/auth_provider.dart';
 import '../services/api_service.dart';
+import '../services/firestore_error_helper.dart';
 import '../services/messenger_service.dart';
 import '../services/notification_service.dart';
 import '../theme/theme_provider.dart';
+import '../widgets/health_check_sheet.dart';
 import 'auth_and_settings_screens.dart';
 import 'chat_screen.dart';
 import 'claims_screen.dart';
@@ -41,6 +43,7 @@ class _AppShellState extends State<AppShell> {
   List<NotificationItem> _expressNotifications = [];
   List<NotificationItem> _fbNotifications = [];
   int _fbUnreadMessages = 0;
+  FirestoreListenerError? _notifError;
   Set<String> _knownNotifIds = {};
   bool _initialFbSnapshotDone = false;
   String? _boundUid;
@@ -89,6 +92,7 @@ class _AppShellState extends State<AppShell> {
     _fbConvSub = null;
     _initialFbSnapshotDone = false;
     _knownNotifIds = {};
+    _notifError = null;
 
     if (user == null) {
       if (mounted) {
@@ -96,6 +100,7 @@ class _AppShellState extends State<AppShell> {
           _expressNotifications = [];
           _fbNotifications = [];
           _fbUnreadMessages = 0;
+          _notifError = null;
         });
       }
       return;
@@ -105,24 +110,42 @@ class _AppShellState extends State<AppShell> {
 
     if (fbVerified) {
       _fbNotifSub = NotificationService.instance
-          .watchUserNotifications(user.id)
-          .listen((items) {
-        if (!mounted) return;
-        if (_initialFbSnapshotDone) {
-          for (final n in items) {
-            if (!n.read && !_knownNotifIds.contains(n.id)) {
-              final titleText =
-                  (widget.i18n.isBn && n.titleBn != null) ? n.titleBn! : n.title;
-              ScaffoldMessenger.of(context)
-                  .showSnackBar(SnackBar(content: Text(titleText)));
-              break;
+          .watchUserNotifications(
+        user.id,
+        onError: (err) {
+          if (mounted) setState(() => _notifError = err);
+        },
+      )
+          .listen(
+        (items) {
+          if (!mounted) return;
+          if (_initialFbSnapshotDone) {
+            for (final n in items) {
+              if (!n.read && !_knownNotifIds.contains(n.id)) {
+                final titleText = (widget.i18n.isBn && n.titleBn != null)
+                    ? n.titleBn!
+                    : n.title;
+                ScaffoldMessenger.of(context)
+                    .showSnackBar(SnackBar(content: Text(titleText)));
+                break;
+              }
             }
           }
-        }
-        _knownNotifIds = items.map((e) => e.id).toSet();
-        _initialFbSnapshotDone = true;
-        setState(() => _fbNotifications = items);
-      }, onError: (_) {});
+          _knownNotifIds = items.map((e) => e.id).toSet();
+          _initialFbSnapshotDone = true;
+          setState(() {
+            _fbNotifications = items;
+            _notifError = null;
+          });
+        },
+        onError: (e) {
+          final parsed = e is FirestoreListenerError
+              ? e
+              : parseFirestoreListenerError(
+                  e, 'LIST', 'users/${user.id}/notifications');
+          if (mounted) setState(() => _notifError = parsed);
+        },
+      );
 
       _fbConvSub = MessengerService.instance
           .watchMyConversations(
@@ -259,6 +282,27 @@ class _AppShellState extends State<AppShell> {
                     ),
                   ),
                   const Divider(height: 1),
+                  if (_notifError != null)
+                    FirestoreErrorBanner(
+                      error: _notifError!,
+                      i18n: widget.i18n,
+                      tokens: widget.theme.tokens,
+                      onRetry: () {
+                        Navigator.pop(ctx);
+                        _boundUid = null;
+                        _rebindAuthStreams();
+                      },
+                      onRunHealthCheck: () {
+                        Navigator.pop(ctx);
+                        showHealthCheckSheet(
+                          context,
+                          auth: widget.auth,
+                          i18n: widget.i18n,
+                          tokens: widget.theme.tokens,
+                          mode: widget.auth.isAdmin ? 'admin' : 'user',
+                        );
+                      },
+                    ),
                   Expanded(
                     child: list.isEmpty
                         ? Center(child: Text(t('notifications.empty')))

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  AlertTriangle,
   Award,
   BadgeCheck,
   Bell,
@@ -12,6 +13,7 @@ import {
   Flame,
   Handshake,
   HeartHandshake,
+  HeartPulse,
   Home,
   LayoutGrid,
   Leaf,
@@ -104,7 +106,6 @@ import {
   openDirectChatForListingOrShop,
   readOfflineMessageQueue,
   reportUserInFirestore,
-  seedStarterDemoConversationsOnce,
   sendDemoPersonaMessage,
   sendMessengerMessage,
   setMessengerTyping,
@@ -114,7 +115,6 @@ import {
   subscribeMyBlockedUsers,
   subscribeMyDemoConversations,
   subscribeMyFirestoreConversations,
-  syncUserDirectoryProfile,
   toggleConversationArchive,
   toggleConversationMute,
   toggleDemoConversationArchive,
@@ -132,11 +132,11 @@ import {
   deleteUserNotification,
   markAllUserNotificationsRead,
   markUserNotificationRead,
-  seedStarterNotificationsOnce,
   subscribeUserNotifications,
 } from './lib/notificationService';
+import { ensureAccount } from './lib/ensureAccountService';
 import { compressImageFileToDataUrl } from './lib/imageCompress';
-import { auth } from './firebase';
+import { auth, type FirestoreListenerError } from './firebase';
 import { useI18n } from './i18n/I18nContext';
 import {
   RequireAuth,
@@ -170,6 +170,7 @@ import { ThemePaletteButton } from './components/ThemePalettePopover';
 import { LanguageToggle } from './components/LanguageToggle';
 import { ShopAvatar } from './components/ShopAvatar';
 import { AdminApplicationsView } from './components/AdminApplicationsView';
+import { HealthCheckModal } from './components/HealthCheckModal';
 import { PWAInstallButton } from './components/PWAInstallButton';
 
 type TabId =
@@ -472,6 +473,17 @@ export default function App() {
   const [selectedAdminOwnerUid, setSelectedAdminOwnerUid] = useState<string | null>(
     initialRoute.adminOwnerUid ?? null
   );
+  const [conversationsError, setConversationsError] = useState<FirestoreListenerError | null>(null);
+  const [messagesError, setMessagesError] = useState<FirestoreListenerError | null>(null);
+  const [directoryError, setDirectoryError] = useState<FirestoreListenerError | null>(null);
+  const [roomsError, setRoomsError] = useState<FirestoreListenerError | null>(null);
+  const [roomMessagesError, setRoomMessagesError] = useState<FirestoreListenerError | null>(null);
+  const [notificationsError, setNotificationsError] = useState<FirestoreListenerError | null>(null);
+  const [healthCheckModal, setHealthCheckModal] = useState<{ open: boolean; mode: 'user' | 'admin' }>({
+    open: false,
+    mode: 'user',
+  });
+  const ensuredSessionUidRef = useRef<string | null>(null);
   const directoryMapRef = useRef<Map<string, UserDirectoryEntry>>(new Map());
   const blockedSetRef = useRef<Set<string>>(new Set());
   const seenNotifIdsRef = useRef<Set<string>>(new Set());
@@ -1012,6 +1024,7 @@ export default function App() {
     if (!(firebaseAuthReady && firebaseUser)) {
       demoTypingTimersRef.current.forEach((timerId) => window.clearTimeout(timerId));
       demoTypingTimersRef.current.clear();
+      ensuredSessionUidRef.current = null;
       setFirestoreListings([]);
       setFirestoreConversations([]);
       setDemoConversations([]);
@@ -1030,6 +1043,12 @@ export default function App() {
       setRestaurantApplications([]);
       setFirebasePlatformUsers([]);
       setMyAdminConversation(null);
+      setConversationsError(null);
+      setMessagesError(null);
+      setDirectoryError(null);
+      setRoomsError(null);
+      setRoomMessagesError(null);
+      setNotificationsError(null);
       directoryMapRef.current = new Map();
       blockedSetRef.current = new Set();
       seenNotifIdsRef.current = new Set();
@@ -1043,11 +1062,16 @@ export default function App() {
     if (isFirebaseVerified && user?.id === firebaseUser.uid) {
       setQueuedMessengerMessages(readOfflineMessageQueue(firebaseUser.uid));
 
-      // Public directory sync, presence tracking, and once-per-user starter seeding
-      void syncUserDirectoryProfile(firebaseUser, user, true);
+      // Self-healing ensureAccount runs once per verified login/app-start + real-time presence
+      if (ensuredSessionUidRef.current !== firebaseUser.uid) {
+        ensuredSessionUidRef.current = firebaseUser.uid;
+        void ensureAccount(firebaseUser, user).then((rep) => {
+          if (rep.fixedCount > 0 && rep.refreshedUser) {
+            updateUser(rep.refreshedUser);
+          }
+        });
+      }
       unsubs.push(startPresenceTracking(firebaseUser.uid));
-      void seedStarterDemoConversationsOnce(firebaseUser, user);
-      void seedStarterNotificationsOnce(firebaseUser, user);
 
       unsubs.push(
         subscribeMyBlockedUsers(firebaseUser.uid, (uids, list) => {
@@ -1062,32 +1086,68 @@ export default function App() {
           firebaseUser.uid,
           () => blockedSetRef.current,
           () => directoryMapRef.current,
-          setFirestoreConversations
+          (convs) => {
+            setConversationsError(null);
+            setFirestoreConversations(convs);
+          },
+          (err) => {
+            setConversationsError(err);
+          }
         )
       );
 
-      unsubs.push(subscribeMyDemoConversations(firebaseUser.uid, setDemoConversations));
-      unsubs.push(subscribeCommunityRooms(setCommunityRooms));
+      unsubs.push(
+        subscribeMyDemoConversations(
+          firebaseUser.uid,
+          (convs) => {
+            setDemoConversations(convs);
+          },
+          (err) => {
+            setConversationsError((prev) => prev ?? err);
+          }
+        )
+      );
 
       unsubs.push(
-        subscribeUserNotifications(firebaseUser.uid, (items) => {
-          setFirestoreNotifications(items);
-          if (!notifsInitializedRef.current) {
+        subscribeCommunityRooms(
+          (rooms) => {
+            setRoomsError(null);
+            setCommunityRooms(rooms);
+          },
+          (err) => {
+            setRoomsError(err);
+          }
+        )
+      );
+
+      unsubs.push(
+        subscribeUserNotifications(
+          firebaseUser.uid,
+          (items) => {
+            setNotificationsError(null);
+            setFirestoreNotifications(items);
+            if (!notifsInitializedRef.current) {
+              items.forEach((it) => seenNotifIdsRef.current.add(it.id));
+              notifsInitializedRef.current = true;
+              return;
+            }
+            const newestUnread = items.find(
+              (it) => !it.read && !it.isStarter && !seenNotifIdsRef.current.has(it.id)
+            );
             items.forEach((it) => seenNotifIdsRef.current.add(it.id));
-            notifsInitializedRef.current = true;
-            return;
+            if (newestUnread) {
+              const toastTitle =
+                langRef.current === 'bn' ? newestUnread.titleBn || newestUnread.title : newestUnread.title;
+              const toastBody =
+                langRef.current === 'bn' ? newestUnread.bodyBn || newestUnread.body : newestUnread.body;
+              setToast({ title: toastTitle, body: toastBody });
+              window.setTimeout(() => setToast(null), 5000);
+            }
+          },
+          (err) => {
+            setNotificationsError(err);
           }
-          const newestUnread = items.find(
-            (it) => !it.read && !it.isStarter && !seenNotifIdsRef.current.has(it.id)
-          );
-          items.forEach((it) => seenNotifIdsRef.current.add(it.id));
-          if (newestUnread) {
-            const toastTitle = langRef.current === 'bn' ? newestUnread.titleBn || newestUnread.title : newestUnread.title;
-            const toastBody = langRef.current === 'bn' ? newestUnread.bodyBn || newestUnread.body : newestUnread.body;
-            setToast({ title: toastTitle, body: toastBody });
-            window.setTimeout(() => setToast(null), 5000);
-          }
-        })
+        )
       );
 
       if (user.role === 'donor') {
@@ -1098,8 +1158,16 @@ export default function App() {
       }
 
       if (isAdmin) {
-        unsubs.push(subscribeAdminNotifications(setAdminNotifications));
-        unsubs.push(subscribeAllAdminConversations(setAdminConversations));
+        unsubs.push(
+          subscribeAdminNotifications(setAdminNotifications, (err) => {
+            setNotificationsError((prev) => prev ?? err);
+          })
+        );
+        unsubs.push(
+          subscribeAllAdminConversations(setAdminConversations, (err) => {
+            setConversationsError((prev) => prev ?? err);
+          })
+        );
         unsubs.push(subscribeRestaurantApplications(setRestaurantApplications));
         unsubs.push(subscribeAllFirebaseUsers(setFirebasePlatformUsers));
       } else {
@@ -1123,25 +1191,32 @@ export default function App() {
     if (!(firebaseAuthReady && firebaseUser && isFirebaseVerified)) {
       setDirectoryEntries([]);
       setDirectoryHasMore(false);
+      setDirectoryError(null);
       return;
     }
     return subscribeDiscoverableDirectory(
       firebaseUser.uid,
       directoryLimit,
       (entries, hasMore) => {
+        setDirectoryError(null);
         directoryMapRef.current = new Map(entries.map((e) => [e.uid, e]));
         setDirectoryEntries(entries);
         setDirectoryHasMore(hasMore);
+      },
+      (err) => {
+        setDirectoryError(err);
       }
     );
   }, [firebaseAuthReady, firebaseUser, isFirebaseVerified, directoryLimit]);
 
-  // Reset message page size when switching active thread or community room
+  // Reset message page size & listener error when switching active thread or community room
   useEffect(() => {
     setMsgPageSize(30);
     setLoadingMoreMessages(false);
     setRoomMsgPageSize(30);
     setLoadingMoreRoom(false);
+    setMessagesError(null);
+    setRoomMessagesError(null);
   }, [resolvedSelectedConvId]);
 
   // Active Community Room messages, members & online presence subscription
@@ -1159,18 +1234,32 @@ export default function App() {
       setRoomMembers([]);
       setRoomHasMore(false);
       setLoadingMoreRoom(false);
+      setRoomMessagesError(null);
       return;
     }
 
     const unsubs: (() => void)[] = [];
     unsubs.push(
-      subscribeRoomMessages(resolvedSelectedConvId, roomMsgPageSize, (msgs, hasMore) => {
-        setRoomMessages(msgs);
-        setRoomHasMore(hasMore);
-        setLoadingMoreRoom(false);
+      subscribeRoomMessages(
+        resolvedSelectedConvId,
+        roomMsgPageSize,
+        (msgs, hasMore) => {
+          setRoomMessagesError(null);
+          setRoomMessages(msgs);
+          setRoomHasMore(hasMore);
+          setLoadingMoreRoom(false);
+        },
+        (err) => {
+          setLoadingMoreRoom(false);
+          setRoomMessagesError(err);
+        }
+      )
+    );
+    unsubs.push(
+      subscribeRoomMembers(resolvedSelectedConvId, setRoomMembers, (err) => {
+        setRoomMessagesError((prev) => prev ?? err);
       })
     );
-    unsubs.push(subscribeRoomMembers(resolvedSelectedConvId, setRoomMembers));
     void ensureRoomMemberPresence(resolvedSelectedConvId, user, isOnline);
 
     return () => {
@@ -1202,6 +1291,7 @@ export default function App() {
       setFirestoreMessages([]);
       setHasMoreMessages(false);
       setLoadingMoreMessages(false);
+      setMessagesError(null);
       return;
     }
     if (activeFirestoreConv.isDemo) {
@@ -1210,12 +1300,17 @@ export default function App() {
         activeFirestoreConv.id,
         msgPageSize,
         (msgs, hasMore) => {
+          setMessagesError(null);
           setFirestoreMessages(msgs);
           setHasMoreMessages(hasMore);
           setLoadingMoreMessages(false);
           if (activeTab === 'chat') {
             void markDemoConversationRead(firebaseUser.uid, activeFirestoreConv.id);
           }
+        },
+        (err) => {
+          setLoadingMoreMessages(false);
+          setMessagesError(err);
         }
       );
     }
@@ -1225,6 +1320,7 @@ export default function App() {
       activeFirestoreConv.peerUid,
       msgPageSize,
       (msgs, hasMore) => {
+        setMessagesError(null);
         setFirestoreMessages(msgs);
         setHasMoreMessages(hasMore);
         setLoadingMoreMessages(false);
@@ -1234,6 +1330,10 @@ export default function App() {
           msgs,
           activeTab === 'chat'
         );
+      },
+      (err) => {
+        setLoadingMoreMessages(false);
+        setMessagesError(err);
       }
     );
   }, [
@@ -2797,6 +2897,54 @@ export default function App() {
             </div>
           </div>
           <div className="max-h-80 overflow-y-auto divide-y divide-[var(--border-subtle)]">
+            {isFirebaseSession && !isFirebaseVerified && (
+              <div className="p-3 bg-amber-50 dark:bg-amber-950/50 text-amber-900 dark:text-amber-100 text-xs space-y-2">
+                <div className="flex items-start gap-2">
+                  <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-amber-600" />
+                  <div>
+                    <p className="font-bold">{t('chatErrors.unverifiedAccountTitle')}</p>
+                    <p className="text-[11px] opacity-90 mt-0.5">
+                      {t('chatErrors.unverifiedAccountBody')}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setNotifOpen(false);
+                    navigateTo('settings');
+                  }}
+                  className="min-h-[28px] px-2.5 py-1 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-[11px] font-bold cursor-pointer"
+                >
+                  {t('chatErrors.goToSettingsBtn')}
+                </button>
+              </div>
+            )}
+
+            {notificationsError && (
+              <div className="p-3 bg-rose-50 dark:bg-rose-950/50 text-rose-900 dark:text-rose-200 text-xs space-y-2">
+                <div className="flex items-start gap-2 font-semibold">
+                  <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-rose-600" />
+                  <span>
+                    {t('chatErrors.couldNotLoadNotifications', {
+                      code: notificationsError.code,
+                    })}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setNotifOpen(false);
+                    setHealthCheckModal({ open: true, mode: isAdmin ? 'admin' : 'user' });
+                  }}
+                  className="min-h-[28px] px-2.5 py-1 rounded-lg bg-white dark:bg-rose-900 text-rose-800 dark:text-rose-100 text-[11px] font-bold inline-flex items-center gap-1 border border-rose-200 cursor-pointer"
+                >
+                  <HeartPulse className="w-3.5 h-3.5" />
+                  {t('healthCheck.runBtn')}
+                </button>
+              </div>
+            )}
+
             {isAdmin &&
               adminNotifications.map((n) => {
                 const notifTitle =
@@ -3630,6 +3778,16 @@ export default function App() {
                 onSelectConversation={handleSelectConversation}
                 onRefreshConversations={loadUserWorkspaceData}
                 onOpenPickupCode={(claim, mode) => setPickupModalState({ claim, mode })}
+                conversationsError={conversationsError}
+                messagesError={messagesError}
+                roomsError={roomsError}
+                roomMessagesError={roomMessagesError}
+                directoryError={directoryError}
+                unverifiedEmailNotice={isFirebaseSession && !isFirebaseVerified}
+                onOpenSettings={() => navigateTo('settings')}
+                onRunHealthCheck={() =>
+                  setHealthCheckModal({ open: true, mode: isAdmin ? 'admin' : 'user' })
+                }
               />
             )}
           </RequireAuth>
@@ -3677,6 +3835,9 @@ export default function App() {
               !isAdmin && (user?.accountType === 'restaurantOwner' || Boolean(myAdminConversation))
                 ? () => navigateTo('chat', { convId: `admin_${user!.id}` })
                 : undefined
+            }
+            onRunHealthCheck={() =>
+              setHealthCheckModal({ open: true, mode: isAdmin ? 'admin' : 'user' })
             }
             onLoginClick={() => openAuthPage('login')}
             onSignupClick={() => openAuthPage('signup')}
@@ -3882,6 +4043,15 @@ export default function App() {
           clearPendingAction();
           closeLoginPrompt();
         }}
+      />
+
+      <HealthCheckModal
+        open={healthCheckModal.open}
+        mode={healthCheckModal.mode}
+        onClose={() => setHealthCheckModal((prev) => ({ ...prev, open: false }))}
+        fbUser={firebaseUser}
+        user={user}
+        onAccountRepaired={updateUser}
       />
     </div>
   );

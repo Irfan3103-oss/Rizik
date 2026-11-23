@@ -3,9 +3,11 @@ import 'dart:math';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart' as fb_auth;
 import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter/foundation.dart';
 import '../firebase_options.dart';
 import '../models/models.dart';
 import 'admin_chat_service.dart';
+import 'firestore_error_helper.dart';
 import 'messenger_service.dart';
 import 'notification_service.dart';
 
@@ -66,7 +68,8 @@ class FirestoreService {
     if (email == 'jafor05101007@student.ndub.edu.bd') return true;
 
     try {
-      final adminDoc = await db.collection('admins').doc(fbUser.uid).get();
+      final adminDoc =
+          await getDocResilient(db.collection('admins').doc(fbUser.uid), db: db);
       if (adminDoc.exists) {
         if (adminDoc.data()?['enabled'] == false) return false;
         return true;
@@ -74,7 +77,7 @@ class FirestoreService {
     } catch (_) {}
 
     try {
-      await db.collection('admins').doc('adminverify').get();
+      await getDocResilient(db.collection('admins').doc('adminverify'), db: db);
       return true;
     } catch (_) {
       return false;
@@ -271,8 +274,8 @@ class FirestoreService {
     final userRef = db.collection('users').doc(uid);
     final privRef = userRef.collection('private').doc('info');
 
-    final pubSnap = await userRef.get();
-    final privSnap = await privRef.get();
+    final pubSnap = await getDocResilient(userRef, db: db);
+    final privSnap = await getDocResilient(privRef, db: db);
 
     final displayName =
         (initialPatch?['displayName']?.toString().trim().isNotEmpty == true)
@@ -355,14 +358,33 @@ class FirestoreService {
 
       await userRef.set(payload);
     } else {
-      final existingDisplayName = pubSnap.data()?['displayName']?.toString();
-      await userRef.update({
-        'displayName': (existingDisplayName != null &&
-                existingDisplayName.isNotEmpty)
-            ? _clampStr(existingDisplayName, 100)
-            : displayName,
+      final existing = pubSnap.data() ?? <String, dynamic>{};
+      final existingDisplayName = existing['displayName']?.toString();
+      final nextDisplayName = (existingDisplayName != null &&
+              existingDisplayName.isNotEmpty)
+          ? _clampStr(existingDisplayName, 100)
+          : displayName;
+      final patchData = <String, dynamic>{
+        'displayName': nextDisplayName,
         'updatedAt': FieldValue.serverTimestamp(),
-      });
+      };
+      if (existing['name'] == null ||
+          existing['name'].toString().trim().isEmpty) {
+        patchData['name'] = nextDisplayName;
+      }
+      if (existing['handle'] == null ||
+          existing['handle'].toString().trim().isEmpty) {
+        patchData['handle'] =
+            MessengerService.instance.generatePublicHandle(nextDisplayName, uid);
+      }
+      if (existing['discoverable'] is! bool) {
+        patchData['discoverable'] = true;
+      }
+      if (existing['area'] == null ||
+          existing['area'].toString().trim().isEmpty) {
+        patchData['area'] = 'Dhanmondi';
+      }
+      await userRef.update(patchData);
     }
 
     if (!privSnap.exists) {
@@ -428,13 +450,26 @@ class FirestoreService {
           .catchError((_) {});
     }
 
-    final freshPub = await userRef.get();
-    final freshPriv = await privRef.get();
+    Map<String, dynamic>? freshPubData = pubSnap.data();
+    Map<String, dynamic>? freshPrivData = privSnap.data();
+    try {
+      final freshPub = await getDocResilient(userRef, db: db);
+      if (freshPub.exists) freshPubData = freshPub.data();
+    } catch (e) {
+      debugPrint('[FirestoreService] freshPub read fallback ($uid): $e');
+    }
+    try {
+      final freshPriv = await getDocResilient(privRef, db: db);
+      if (freshPriv.exists) freshPrivData = freshPriv.data();
+    } catch (e) {
+      debugPrint('[FirestoreService] freshPriv read fallback ($uid): $e');
+    }
+
     final isAdmin = isAdminOverride ?? await checkIsAdmin(fbUser);
     return buildAppUser(
       fbUser,
-      pubData: freshPub.data(),
-      privData: freshPriv.data(),
+      pubData: freshPubData,
+      privData: freshPrivData,
       isAdmin: isAdmin,
     );
   }
@@ -463,24 +498,34 @@ class FirestoreService {
 
     controller = StreamController<AppUser>(
       onListen: () {
-        subPub = db.collection('users').doc(uid).snapshots().listen((snap) {
-          if (snap.exists && snap.data() != null) {
-            latestPub = snap.data();
-            emit();
-          }
-        });
+        subPub = db.collection('users').doc(uid).snapshots().listen(
+          (snap) {
+            if (snap.exists && snap.data() != null) {
+              latestPub = snap.data();
+              emit();
+            }
+          },
+          onError: (e) {
+            debugPrint('[FirestoreService] watchMyFirebaseUser pub error: $e');
+          },
+        );
         subPriv = db
             .collection('users')
             .doc(uid)
             .collection('private')
             .doc('info')
             .snapshots()
-            .listen((snap) {
-          if (snap.exists && snap.data() != null) {
-            latestPriv = snap.data();
-            emit();
-          }
-        });
+            .listen(
+          (snap) {
+            if (snap.exists && snap.data() != null) {
+              latestPriv = snap.data();
+              emit();
+            }
+          },
+          onError: (e) {
+            debugPrint('[FirestoreService] watchMyFirebaseUser priv error: $e');
+          },
+        );
       },
       onCancel: () async {
         await subPub?.cancel();

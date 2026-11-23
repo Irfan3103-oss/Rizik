@@ -3,14 +3,30 @@ import 'dart:math';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart' as fb_auth;
 import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter/foundation.dart';
 import '../firebase_options.dart';
 import '../models/models.dart';
+import 'firestore_error_helper.dart';
+
+class NotificationSeedResult {
+  final int createdCount;
+  final int alreadyHadCount;
+  final bool markedFlag;
+  final String? error;
+
+  const NotificationSeedResult({
+    required this.createdCount,
+    required this.alreadyHadCount,
+    required this.markedFlag,
+    this.error,
+  });
+}
 
 class NotificationService {
   NotificationService._();
   static final NotificationService instance = NotificationService._();
 
-  final Map<String, Future<void>> _inFlightSeed = {};
+  final Map<String, Future<NotificationSeedResult>> _inFlightSeed = {};
   final Random _rng = Random();
 
   FirebaseFirestore get db => FirebaseFirestore.instanceFor(
@@ -49,38 +65,75 @@ class NotificationService {
     'admin',
   };
 
-  Future<void> seedStarterNotificationsOnce(
+  Future<NotificationSeedResult> seedStarterNotificationsOnce(
     fb_auth.User fbUser,
-    AppUser appUser,
-  ) {
-    final existing = _inFlightSeed[fbUser.uid];
-    if (existing != null) return existing;
+    AppUser appUser, {
+    bool forceCheck = false,
+  }) {
+    if (!forceCheck) {
+      final existing = _inFlightSeed[fbUser.uid];
+      if (existing != null) return existing;
+    }
 
-    final future = _doSeedStarterNotificationsOnce(fbUser, appUser).whenComplete(() {
+    final future =
+        _doSeedStarterNotificationsOnce(fbUser, appUser, forceCheck: forceCheck)
+            .whenComplete(() {
       _inFlightSeed.remove(fbUser.uid);
     });
-    _inFlightSeed[fbUser.uid] = future;
+    if (!forceCheck) {
+      _inFlightSeed[fbUser.uid] = future;
+    }
     return future;
   }
 
-  Future<void> _doSeedStarterNotificationsOnce(
+  Future<NotificationSeedResult> _doSeedStarterNotificationsOnce(
     fb_auth.User fbUser,
-    AppUser _,
-  ) async {
+    AppUser _, {
+    bool forceCheck = false,
+  }) async {
     final uid = _sanitizeId(fbUser.uid);
     final userRef = db.collection('users').doc(uid);
+    final notifCol = userRef.collection('notifications');
 
-    DocumentSnapshot<Map<String, dynamic>> userSnap;
+    Map<String, dynamic>? userData;
     try {
-      userSnap = await userRef.get();
-    } catch (_) {
-      return;
+      final userSnap = await getDocResilient(userRef, db: db);
+      if (userSnap.exists) userData = userSnap.data();
+    } catch (err) {
+      debugPrint(
+        '[NotificationService] Could not read user doc before seeding notifications: $err',
+      );
     }
 
-    if (!userSnap.exists) return;
-    if (userSnap.data()?['notificationsSeeded'] == true) return;
+    Set<String> existingIds = {};
+    var totalExisting = 0;
+    try {
+      final existingSnap = await getDocsResilient(notifCol.limit(40), db: db);
+      totalExisting = existingSnap.size;
+      existingIds = existingSnap.docs.map((d) => d.id).toSet();
+    } catch (err) {
+      debugPrint(
+        '[NotificationService] Failed reading notifications subcollection: $err',
+      );
+      return NotificationSeedResult(
+        createdCount: 0,
+        alreadyHadCount: 0,
+        markedFlag: false,
+        error: err.toString(),
+      );
+    }
 
-    final demoTeamConvId = _sanitizeId('demo_${uid}_team');
+    if (!forceCheck &&
+        userData?['notificationsSeeded'] == true &&
+        totalExisting > 0) {
+      return NotificationSeedResult(
+        createdCount: 0,
+        alreadyHadCount: totalExisting,
+        markedFlag: true,
+      );
+    }
+
+    const demoTeamConvId = 'demo_team';
     final starters = <Map<String, String?>>[
       {
         'id': _sanitizeId('starter_welcome_$uid'),
@@ -144,79 +197,179 @@ class NotificationService {
       },
     ];
 
-    final batch = db.batch();
-    for (final item in starters) {
-      final notifRef = db
-          .collection('users')
-          .doc(uid)
-          .collection('notifications')
-          .doc(item['id']!);
-      batch.set(notifRef, {
-        'recipientUid': uid,
-        'senderUid': uid,
-        'senderName': 'Rizik Team',
-        'type': item['type'],
-        'title': _clampStr(item['title'], 140),
-        'titleBn': _clampStr(item['titleBn'], 180),
-        'body': _clampStr(item['body'], 500),
-        'bodyBn': _clampStr(item['bodyBn'], 600),
-        'read': false,
-        'isStarter': true,
-        'conversationId': item['conversationId'],
-        'listingId': null,
-        'claimId': null,
-        'linkTab': item['linkTab'],
-        'createdAt': FieldValue.serverTimestamp(),
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
-    }
-    batch.update(userRef, {
-      'notificationsSeeded': true,
-      'updatedAt': FieldValue.serverTimestamp(),
-    });
+    final missingStarters =
+        starters.where((s) => !existingIds.contains(s['id'])).toList();
+    var createdCount = 0;
 
-    try {
-      await batch.commit();
-    } catch (_) {
-      // Non-fatal if concurrently seeded or offline
-    }
-  }
+    if (missingStarters.isNotEmpty &&
+        (totalExisting == 0 ||
+            userData?['notificationsSeeded'] != true ||
+            forceCheck)) {
+      final batch = db.batch();
+      for (final item in missingStarters) {
+        final notifRef = notifCol.doc(item['id']!);
+        batch.set(notifRef, {
+          'recipientUid': uid,
+          'senderUid': uid,
+          'senderName': 'Rizik Team',
+          'type': item['type'],
+          'title': _clampStr(item['title'], 140),
+          'titleBn': _clampStr(item['titleBn'], 180),
+          'body': _clampStr(item['body'], 500),
+          'bodyBn': _clampStr(item['bodyBn'], 600),
+          'read': false,
+          'isStarter': true,
+          'conversationId': item['conversationId'],
+          'listingId': null,
+          'claimId': null,
+          'linkTab': item['linkTab'],
+          'createdAt': FieldValue.serverTimestamp(),
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+        createdCount += 1;
+      }
 
-  Stream<List<NotificationItem>> watchUserNotifications(String uid) {
-    final safeUid = _sanitizeId(uid);
-    return db
-        .collection('users')
-        .doc(safeUid)
-        .collection('notifications')
-        .orderBy('createdAt', descending: true)
-        .limit(60)
-        .snapshots()
-        .map((snap) {
-      return snap.docs.map((d) {
-        final data = d.data();
-        return NotificationItem(
-          id: d.id,
-          userId: (data['recipientUid'] ?? safeUid).toString(),
-          type: (data['type'] ?? 'system').toString(),
-          title: (data['title'] ?? '').toString(),
-          titleBn: data['titleBn']?.toString(),
-          body: (data['body'] ?? '').toString(),
-          bodyBn: data['bodyBn']?.toString(),
-          read: data['read'] == true,
-          isStarter: data['isStarter'] == true,
-          conversationId: data['conversationId']?.toString(),
-          listingId: data['listingId']?.toString(),
-          claimId: data['claimId']?.toString(),
-          linkTab: data['linkTab']?.toString(),
-          senderUid: data['senderUid']?.toString(),
-          senderName: data['senderName']?.toString(),
-          createdAt: _tsToIso(data['createdAt']),
+      try {
+        await batch.commit();
+      } catch (err) {
+        debugPrint(
+          '[NotificationService] Failed committing starter notifications: $err',
         );
-      }).toList();
-    });
+        return NotificationSeedResult(
+          createdCount: 0,
+          alreadyHadCount: totalExisting,
+          markedFlag: false,
+          error: err.toString(),
+        );
+      }
+    }
+
+    var markedFlag = userData?['notificationsSeeded'] == true;
+    if (!markedFlag && userData != null) {
+      try {
+        await userRef.update({
+          'notificationsSeeded': true,
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+        markedFlag = true;
+      } catch (err) {
+        debugPrint(
+          '[NotificationService] Notifications seeded, but could not mark flag on user doc: $err',
+        );
+      }
+    }
+
+    return NotificationSeedResult(
+      createdCount: createdCount,
+      alreadyHadCount: totalExisting,
+      markedFlag: markedFlag,
+    );
   }
 
-  Future<void> markUserNotificationRead(String uid, String notificationId) async {
+  NotificationItem _mapDoc(
+    String id,
+    Map<String, dynamic> data,
+    String safeUid,
+  ) {
+    return NotificationItem(
+      id: id,
+      userId: (data['recipientUid'] ?? safeUid).toString(),
+      type: (data['type'] ?? 'system').toString(),
+      title: (data['title'] ?? '').toString(),
+      titleBn: data['titleBn']?.toString(),
+      body: (data['body'] ?? '').toString(),
+      bodyBn: data['bodyBn']?.toString(),
+      read: data['read'] == true,
+      isStarter: data['isStarter'] == true,
+      conversationId: data['conversationId']?.toString(),
+      listingId: data['listingId']?.toString(),
+      claimId: data['claimId']?.toString(),
+      linkTab: data['linkTab']?.toString(),
+      senderUid: data['senderUid']?.toString(),
+      senderName: data['senderName']?.toString(),
+      createdAt: _tsToIso(data['createdAt']),
+    );
+  }
+
+  Stream<List<NotificationItem>> watchUserNotifications(
+    String uid, {
+    void Function(FirestoreListenerError err)? onError,
+  }) {
+    final safeUid = _sanitizeId(uid);
+    late StreamController<List<NotificationItem>> controller;
+    StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? sub;
+    var usingFallback = false;
+
+    void attachFallback() {
+      if (usingFallback || controller.isClosed) return;
+      usingFallback = true;
+      sub?.cancel();
+      sub = db
+          .collection('users')
+          .doc(safeUid)
+          .collection('notifications')
+          .limit(60)
+          .snapshots()
+          .listen(
+        (snap) {
+          final items = snap.docs
+              .map((d) => _mapDoc(d.id, d.data(), safeUid))
+              .toList()
+            ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+          if (!controller.isClosed) controller.add(items);
+        },
+        onError: (e, st) {
+          final parsed = parseFirestoreListenerError(
+            e,
+            'LIST',
+            'users/$safeUid/notifications',
+          );
+          onError?.(parsed);
+          if (!controller.isClosed) controller.addError(parsed, st);
+        },
+      );
+    }
+
+    controller = StreamController<List<NotificationItem>>(
+      onListen: () {
+        sub = db
+            .collection('users')
+            .doc(safeUid)
+            .collection('notifications')
+            .orderBy('createdAt', descending: true)
+            .limit(60)
+            .snapshots()
+            .listen(
+          (snap) {
+            final items = snap.docs
+                .map((d) => _mapDoc(d.id, d.data(), safeUid))
+                .toList();
+            if (!controller.isClosed) controller.add(items);
+          },
+          onError: (e, st) {
+            final parsed = parseFirestoreListenerError(
+              e,
+              'LIST',
+              'users/$safeUid/notifications',
+            );
+            if (parsed.isIndexError) {
+              attachFallback();
+              return;
+            }
+            onError?.(parsed);
+            if (!controller.isClosed) controller.addError(parsed, st);
+          },
+        );
+      },
+      onCancel: () async => await sub?.cancel(),
+    );
+    return controller.stream;
+  }
+
+  Future<void> markUserNotificationRead(
+    String uid,
+    String notificationId,
+  ) async {
     final safeUid = _sanitizeId(uid);
     final safeNotifId = _sanitizeId(notificationId);
     await db
@@ -253,7 +406,10 @@ class NotificationService {
     }
   }
 
-  Future<void> deleteUserNotification(String uid, String notificationId) async {
+  Future<void> deleteUserNotification(
+    String uid,
+    String notificationId,
+  ) async {
     final safeUid = _sanitizeId(uid);
     final safeNotifId = _sanitizeId(notificationId);
     await db
@@ -291,6 +447,9 @@ class NotificationService {
       'n_${DateTime.now().millisecondsSinceEpoch}_$randSuffix',
     );
     final safeTab = _validLinkTabs.contains(linkTab) ? linkTab : 'inbox';
+    final cleanTitle = _clampStr(title, 140);
+    final cleanBody = _clampStr(body, 500);
+    final cleanSenderName = _clampStr(senderName, 120);
 
     try {
       await db
@@ -301,13 +460,11 @@ class NotificationService {
           .set({
         'recipientUid': safeRecipient,
         'senderUid': safeSender,
-        'senderName': _clampStr(senderName, 120).isNotEmpty
-            ? _clampStr(senderName, 120)
-            : 'Rizik User',
+        'senderName': cleanSenderName.isNotEmpty ? cleanSenderName : 'Rizik User',
         'type': type,
-        'title': _clampStr(title, 140),
+        'title': cleanTitle.isNotEmpty ? cleanTitle : 'Rizik',
         'titleBn': titleBn != null ? _clampStr(titleBn, 180) : null,
-        'body': _clampStr(body, 500),
+        'body': cleanBody.isNotEmpty ? cleanBody : 'New update',
         'bodyBn': bodyBn != null ? _clampStr(bodyBn, 600) : null,
         'read': false,
         'isStarter': false,
@@ -319,8 +476,10 @@ class NotificationService {
         'createdAt': FieldValue.serverTimestamp(),
         'updatedAt': FieldValue.serverTimestamp(),
       });
-    } catch (_) {
-      // Non-fatal if recipient is a seeded non-Firestore user or blocked
+    } catch (err) {
+      debugPrint(
+        '[NotificationService] Could not deliver notification ($type) to $safeRecipient: $err',
+      );
     }
   }
 }

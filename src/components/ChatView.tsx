@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
+  AlertTriangle,
   Archive,
   ArrowLeft,
   BadgeCheck,
@@ -15,6 +16,7 @@ import {
   Flag,
   Forward,
   HeartHandshake,
+  HeartPulse,
   Image as ImageIcon,
   Languages,
   Loader2,
@@ -38,8 +40,10 @@ import {
   RotateCcw,
   Search,
   Send,
+  Settings,
   ShieldCheck,
   SmilePlus,
+  Sparkles,
   Square,
   Store,
   Trash2,
@@ -49,6 +53,12 @@ import {
   X,
   Zap,
 } from 'lucide-react';
+import type { FirestoreListenerError } from '../firebase';
+import {
+  DEMO_PERSONAS,
+  RIZIK_TEAM_PERSONA,
+  personaToDirectoryEntry,
+} from '../data/demoPersonas';
 import type {
   AdminConversation,
   AdminNotificationItem,
@@ -204,6 +214,14 @@ interface ChatViewProps {
   onSelectConversation: (id: string | null) => void;
   onRefreshConversations: () => void;
   onOpenPickupCode: (claim: Claim, mode: 'recipient' | 'donor') => void;
+  conversationsError?: FirestoreListenerError | null;
+  messagesError?: FirestoreListenerError | null;
+  roomsError?: FirestoreListenerError | null;
+  roomMessagesError?: FirestoreListenerError | null;
+  directoryError?: FirestoreListenerError | null;
+  unverifiedEmailNotice?: boolean;
+  onOpenSettings?: () => void;
+  onRunHealthCheck?: () => void;
 }
 
 const STATUS_TONE: Record<string, string> = {
@@ -287,6 +305,14 @@ export function ChatView({
   onSelectConversation,
   onRefreshConversations,
   onOpenPickupCode,
+  conversationsError = null,
+  messagesError = null,
+  roomsError = null,
+  roomMessagesError = null,
+  directoryError = null,
+  unverifiedEmailNotice = false,
+  onOpenSettings,
+  onRunHealthCheck,
 }: ChatViewProps) {
   const { lang, t, formatNumber, formatTime, formatWindow } = useI18n();
   const { darkMode } = useTheme();
@@ -487,6 +513,22 @@ export function ChatView({
     () => zeroPiiDirectory.filter((u) => u.online).length,
     [zeroPiiDirectory]
   );
+
+  const suggestedPersonas = useMemo<UserDirectoryEntry[]>(() => {
+    const directoryById = new Map(zeroPiiDirectory.map((d) => [d.uid, d]));
+    const featured = [RIZIK_TEAM_PERSONA, ...DEMO_PERSONAS.slice(0, 4)];
+    const q = inboxSearch.trim().toLowerCase();
+    return featured
+      .map((p) => directoryById.get(p.id) ?? personaToDirectoryEntry(p))
+      .filter((entry) => {
+        if (!q) return true;
+        return (
+          entry.displayName.toLowerCase().includes(q) ||
+          entry.handle.toLowerCase().includes(q) ||
+          entry.area.toLowerCase().includes(q)
+        );
+      });
+  }, [zeroPiiDirectory, inboxSearch]);
 
   const handleOpenPerson = useCallback(
     async (entry: UserDirectoryEntry) => {
@@ -2019,6 +2061,82 @@ export function ChatView({
           }}
           className="flex-1 min-h-0 overflow-y-auto"
         >
+          {/* Visible Auth / Firestore Error Banners */}
+          {unverifiedEmailNotice && (
+            <div className="m-2.5 p-3 rounded-xl border border-amber-300 bg-amber-50 dark:bg-amber-950/50 dark:border-amber-800 text-amber-900 dark:text-amber-100 space-y-2">
+              <div className="flex items-start gap-2 text-xs font-semibold">
+                <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-amber-600" />
+                <div className="min-w-0">
+                  <p className="font-bold">{t('chatErrors.unverifiedAccountTitle')}</p>
+                  <p className="text-[11px] font-normal opacity-90 mt-0.5">
+                    {t('chatErrors.unverifiedAccountBody')}
+                  </p>
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                {onOpenSettings && (
+                  <button
+                    type="button"
+                    onClick={onOpenSettings}
+                    className="min-h-[30px] px-2.5 py-1 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer"
+                  >
+                    <Settings className="w-3.5 h-3.5" />
+                    {t('chatErrors.goToSettingsBtn')}
+                  </button>
+                )}
+                {onRunHealthCheck && (
+                  <button
+                    type="button"
+                    onClick={onRunHealthCheck}
+                    className="min-h-[30px] px-2.5 py-1 rounded-lg bg-white dark:bg-amber-900 text-amber-900 dark:text-amber-100 text-[11px] font-bold inline-flex items-center gap-1 border border-amber-200 cursor-pointer"
+                  >
+                    <HeartPulse className="w-3.5 h-3.5" />
+                    {t('healthCheck.runBtn')}
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
+          {(conversationsError || roomsError || directoryError) && (
+            <div className="m-2.5 p-3 rounded-xl border border-rose-300 bg-rose-50 dark:bg-rose-950/50 dark:border-rose-800 text-rose-900 dark:text-rose-200 space-y-2">
+              {conversationsError && (
+                <div className="flex items-start gap-2 text-xs font-semibold">
+                  <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-rose-600" />
+                  <span>
+                    {t('chatErrors.couldNotLoadChats', { code: conversationsError.code })}
+                  </span>
+                </div>
+              )}
+              {roomsError && (
+                <div className="flex items-start gap-2 text-xs font-semibold">
+                  <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-rose-600" />
+                  <span>
+                    {t('chatErrors.couldNotLoadRooms', { code: roomsError.code })}
+                  </span>
+                </div>
+              )}
+              {directoryError && (
+                <div className="flex items-start gap-2 text-xs font-semibold">
+                  <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-rose-600" />
+                  <span>
+                    {t('chatErrors.couldNotLoadPeople', { code: directoryError.code })}
+                  </span>
+                </div>
+              )}
+              {onRunHealthCheck && (
+                <button
+                  type="button"
+                  onClick={onRunHealthCheck}
+                  className="min-h-[30px] px-2.5 py-1 rounded-lg bg-white dark:bg-rose-900 text-rose-800 dark:text-rose-100 text-[11px] font-bold inline-flex items-center gap-1 border border-rose-200 cursor-pointer"
+                >
+                  <HeartPulse className="w-3.5 h-3.5" />
+                  {t('healthCheck.runBtn')}
+                </button>
+              )}
+            </div>
+          )}
+
           {/* Zero-PII Messenger People Strip */}
           {zeroPiiDirectory.length > 0 && (
             <div className="border-b border-[var(--border-subtle)] bg-[var(--bg-surface)]">
@@ -2365,7 +2483,8 @@ export function ChatView({
           {totalThreadsCount === 0 &&
           archivedConvs.length === 0 &&
           filteredAdminNotifications.length === 0 &&
-          filteredRooms.length === 0 ? (
+          filteredRooms.length === 0 &&
+          !(inboxFilter === 'all' && suggestedPersonas.length > 0) ? (
             <div className="p-8 text-center space-y-2">
               <MessageSquare className="w-8 h-8 text-[var(--text-muted)] opacity-50 mx-auto" />
               <p className="text-sm font-semibold text-[var(--text-primary)]">
@@ -2377,7 +2496,8 @@ export function ChatView({
             filteredAdminConvs.length === 0 &&
             !showPinnedOwnerConv &&
             filteredAdminNotifications.length === 0 &&
-            filteredRooms.length === 0 ? (
+            filteredRooms.length === 0 &&
+            !(inboxFilter === 'all' && suggestedPersonas.length > 0) ? (
             <div className="p-8 text-center space-y-2">
               <Search className="w-7 h-7 text-[var(--text-muted)] opacity-50 mx-auto" />
               <p className="text-xs font-semibold text-[var(--text-secondary)]">
@@ -2420,6 +2540,65 @@ export function ChatView({
               )}
             </>
           )}
+
+          {/* Suggested Demo Chats (always ensures Inbox is populated & approachable) */}
+          {inboxFilter === 'all' && suggestedPersonas.length > 0 && (
+            <div className="border-t border-[var(--border-subtle)]">
+              <div className="px-4 py-2 bg-amber-50/60 dark:bg-amber-950/20 border-b border-[var(--border-subtle)]">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="inline-flex items-center gap-1.5 text-[11px] font-bold text-amber-800 dark:text-amber-200">
+                    <Sparkles className="w-3.5 h-3.5 shrink-0" />
+                    {t('chat.suggestedChatsTitle')}
+                  </span>
+                  <span className="text-[10px] font-semibold text-amber-700 dark:text-amber-300 tabular-nums">
+                    {formatNumber(suggestedPersonas.length)}
+                  </span>
+                </div>
+                <p className="text-[10px] text-[var(--text-muted)] mt-0.5 leading-snug">
+                  {t('chat.suggestedChatsSubtitle')}
+                </p>
+              </div>
+              <div className="divide-y divide-[var(--border-subtle)]">
+                {suggestedPersonas.map((entry) => {
+                  const displayName =
+                    lang === 'bn' && RIZIK_TEAM_PERSONA.id === entry.uid
+                      ? RIZIK_TEAM_PERSONA.displayNameBn || RIZIK_TEAM_PERSONA.displayName
+                      : entry.restaurantName || entry.displayName;
+                  return (
+                    <button
+                      key={`suggested_${entry.uid}`}
+                      type="button"
+                      disabled={Boolean(startingUserId)}
+                      onClick={() => handleOpenPerson(entry)}
+                      className="w-full px-3.5 py-2.5 flex items-center gap-3 text-left hover:bg-[var(--brand-soft)]/50 transition-colors cursor-pointer disabled:opacity-60"
+                    >
+                      <ShopAvatar
+                        name={displayName}
+                        imageUrl={entry.photoURL ?? null}
+                        online={entry.online}
+                        showStatusDot
+                        size="sm"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <span className="text-xs font-bold text-[var(--text-primary)] truncate">
+                            {displayName}
+                          </span>
+                          <DemoBadge />
+                        </div>
+                        <p className="text-[11px] text-[var(--text-muted)] truncate mt-0.5">
+                          {entry.handle} · {entry.area}
+                        </p>
+                      </div>
+                      <span className="px-2 py-1 rounded-lg bg-[var(--brand-soft)] text-[var(--brand-text)] text-[10px] font-bold shrink-0">
+                        {t('rooms.messageShort')}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -2456,6 +2635,8 @@ export function ChatView({
             blockedUids={blockedUids}
             directoryEntries={zeroPiiDirectory}
             sidebarOpenOnDesktop={!inboxHiddenOnDesktop}
+            roomMessagesError={roomMessagesError}
+            onRunHealthCheck={onRunHealthCheck}
             onShowSidebarDesktop={() => setInboxHiddenOnDesktop(false)}
             onBackMobile={() => {
               setInboxHiddenOnDesktop(false);
@@ -3051,6 +3232,25 @@ export function ChatView({
                     </button>
                   )}
                 </div>
+              </div>
+            )}
+
+            {messagesError && (
+              <div className="px-4 py-2.5 bg-rose-50 dark:bg-rose-950/50 border-b border-rose-200 dark:border-rose-800 text-rose-900 dark:text-rose-200 text-xs flex flex-wrap items-center justify-between gap-2 shrink-0">
+                <span className="inline-flex items-center gap-1.5 font-semibold">
+                  <AlertTriangle className="w-4 h-4 shrink-0 text-rose-600" />
+                  {t('chatErrors.couldNotLoadMessages', { code: messagesError.code })}
+                </span>
+                {onRunHealthCheck && (
+                  <button
+                    type="button"
+                    onClick={onRunHealthCheck}
+                    className="min-h-[28px] px-2.5 py-1 rounded-lg bg-white dark:bg-rose-900 text-rose-800 dark:text-rose-100 text-[11px] font-bold inline-flex items-center gap-1 border border-rose-200 cursor-pointer"
+                  >
+                    <HeartPulse className="w-3.5 h-3.5" />
+                    {t('healthCheck.runBtn')}
+                  </button>
+                )}
               </div>
             )}
 
@@ -4113,6 +4313,8 @@ export function ChatView({
         onLoadMore={onLoadMoreDirectory}
         blockedUids={blockedUids}
         onSelectPerson={handleOpenPerson}
+        directoryError={directoryError}
+        onRunHealthCheck={onRunHealthCheck}
       />
 
       {/* Report User Modal */}

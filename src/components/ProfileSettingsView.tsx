@@ -3,10 +3,13 @@ import {
   Award,
   BadgeCheck,
   Ban,
+  CheckCircle2,
   Clock,
   Eye,
   Globe,
   HeartHandshake,
+  HeartPulse,
+  Loader2,
   Lock,
   LogIn,
   LogOut,
@@ -20,11 +23,13 @@ import {
   TrendingUp,
   UserPlus,
   Users,
+  Wrench,
   XCircle,
 } from 'lucide-react';
 import type { AuthSession, DonationRecord, User } from '../types';
 import { api } from '../lib/api';
 import { useAuth } from '../auth/AuthContext';
+import { ensureAccount, type EnsureAccountReport } from '../lib/ensureAccountService';
 import {
   subscribeMyFirestoreDonations,
   updateFirebaseUserProfile,
@@ -48,6 +53,7 @@ interface ProfileSettingsViewProps {
   onNavigateLeaderboard?: () => void;
   onNavigateAdmin?: () => void;
   onOpenAdminChat?: () => void;
+  onRunHealthCheck?: () => void;
   onLoginClick?: () => void;
   onSignupClick?: () => void;
 }
@@ -75,6 +81,7 @@ export function ProfileSettingsView({
   onNavigateLeaderboard,
   onNavigateAdmin,
   onOpenAdminChat,
+  onRunHealthCheck,
   onLoginClick,
   onSignupClick,
 }: ProfileSettingsViewProps) {
@@ -100,6 +107,8 @@ export function ProfileSettingsView({
   const [savedMsg, setSavedMsg] = useState<string | null>(null);
   const [verifyBusy, setVerifyBusy] = useState(false);
   const [verifyMsg, setVerifyMsg] = useState<string | null>(null);
+  const [repairBusy, setRepairBusy] = useState(false);
+  const [repairReport, setRepairReport] = useState<EnsureAccountReport | null>(null);
   const [resubmitOpen, setResubmitOpen] = useState(false);
   const [myDonations, setMyDonations] = useState<DonationRecord[]>([]);
   const [demoAccounts, setDemoAccounts] = useState<
@@ -248,6 +257,21 @@ export function ProfileSettingsView({
       setVerifyMsg(t('settings.stillUnverifiedNotice'));
     } finally {
       setVerifyBusy(false);
+    }
+  };
+
+  const handleRepairAccount = async () => {
+    if (!firebaseUser || !user || repairBusy) return;
+    setRepairBusy(true);
+    setRepairReport(null);
+    try {
+      const report = await ensureAccount(firebaseUser, user, { force: true });
+      setRepairReport(report);
+      if (report.refreshedUser) {
+        onUserUpdated(report.refreshedUser);
+      }
+    } finally {
+      setRepairBusy(false);
     }
   };
 
@@ -555,6 +579,87 @@ export function ProfileSettingsView({
 
             {savedMsg && (
               <p className="text-xs font-medium text-[var(--brand-text)]">{savedMsg}</p>
+            )}
+
+            {isFirebaseSession && firebaseUser && (
+              <div className="p-4 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-subtle)]/55 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="text-xs sm:text-sm font-bold text-[var(--text-primary)]">
+                      {t('account.repairSectionTitle')}
+                    </p>
+                    <p className="text-[11px] text-[var(--text-muted)] mt-0.5 leading-snug">
+                      {t('account.repairSectionDesc')}
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {isFirebaseVerified && (
+                      <button
+                        type="button"
+                        disabled={repairBusy}
+                        onClick={handleRepairAccount}
+                        className="min-h-[36px] px-3 py-1.5 rounded-xl bg-[var(--brand-soft)] hover:bg-[var(--brand-primary)] hover:text-[var(--brand-primary-fg)] text-[var(--brand-text)] text-xs font-bold inline-flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-60"
+                      >
+                        {repairBusy ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        ) : (
+                          <Wrench className="w-3.5 h-3.5" />
+                        )}
+                        <span>{t('account.repairAccountBtn')}</span>
+                      </button>
+                    )}
+                    {onRunHealthCheck && (
+                      <button
+                        type="button"
+                        onClick={onRunHealthCheck}
+                        className="min-h-[36px] px-3 py-1.5 rounded-xl border border-[var(--border-strong)] bg-[var(--bg-canvas)] text-[var(--text-primary)] text-xs font-semibold inline-flex items-center gap-1.5 hover:bg-[var(--bg-subtle)] cursor-pointer"
+                      >
+                        <HeartPulse className="w-3.5 h-3.5 text-[var(--brand-text)]" />
+                        <span>{t('healthCheck.runBtn')}</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {repairReport && (
+                  <div className="rounded-xl border border-emerald-200/80 dark:border-emerald-900/60 bg-[var(--bg-surface)] p-3 space-y-1.5 text-xs">
+                    <div className="font-bold text-emerald-700 dark:text-emerald-300 flex items-center gap-1.5">
+                      <CheckCircle2 className="w-4 h-4 shrink-0" />
+                      <span>
+                        {t('account.repairSummary', {
+                          fixed: formatNumber(repairReport.fixedCount),
+                          errors: formatNumber(repairReport.errorCount),
+                        })}
+                      </span>
+                    </div>
+                    <ul className="space-y-1 text-[11px] text-[var(--text-secondary)]">
+                      {repairReport.steps.map((step) => (
+                        <li key={step.id} className="flex items-start gap-1.5">
+                          <span
+                            className={`mt-0.5 font-bold ${
+                              step.status === 'error'
+                                ? 'text-rose-600'
+                                : step.status === 'fixed'
+                                  ? 'text-emerald-600'
+                                  : 'text-[var(--text-muted)]'
+                            }`}
+                          >
+                            {step.status === 'error'
+                              ? '✕'
+                              : step.status === 'fixed'
+                                ? '✓ Fixed'
+                                : '✓'}
+                          </span>
+                          <span>
+                            <strong>{lang === 'bn' ? step.labelBn : step.label}:</strong>{' '}
+                            {lang === 'bn' ? step.detailBn : step.detail}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
             )}
 
             <button

@@ -6,38 +6,13 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart' as fb_auth;
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_storage/firebase_storage.dart';
+import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../data/demo_personas.dart';
 import '../firebase_options.dart';
 import '../models/models.dart';
+import 'firestore_error_helper.dart';
 import 'notification_service.dart';
-
-class _DemoShopSpec {
-  final String key;
-  final String shopUid;
-  final String name;
-  final String nameBn;
-  final String handle;
-  final String area;
-  final String avatar;
-  final String hours;
-  final bool isOfficial;
-  final List<({bool fromShop, String text})> sampleMessages;
-  final String autoReply;
-
-  const _DemoShopSpec({
-    required this.key,
-    required this.shopUid,
-    required this.name,
-    required this.nameBn,
-    required this.handle,
-    required this.area,
-    required this.avatar,
-    required this.hours,
-    required this.isOfficial,
-    required this.sampleMessages,
-    required this.autoReply,
-  });
-}
 
 class QueuedMessengerMessage {
   final String tempId;
@@ -136,12 +111,19 @@ class MessengerMessagesPage {
   const MessengerMessagesPage(this.messages, this.hasMore);
 }
 
+class StarterConvSeedResult {
+  final String status; // 'already_present' | 'created' | 'repaired' | 'error'
+  final String? error;
+
+  const StarterConvSeedResult({required this.status, this.error});
+}
+
 class MessengerService {
   MessengerService._();
   static final MessengerService instance = MessengerService._();
 
   final Map<String, Future<void>> _inFlightDirSync = {};
-  final Map<String, Future<void>> _inFlightStarterSeed = {};
+  final Map<String, Future<StarterConvSeedResult>> _inFlightStarterSeed = {};
   final Random _rng = Random();
 
   static const String _offlineQueueKey = 'ahar_fb_chat_offline_queue_v1';
@@ -150,117 +132,6 @@ class MessengerService {
         app: Firebase.app(),
         databaseId: DefaultFirebaseOptions.firestoreDatabaseId,
       );
-
-  static const List<_DemoShopSpec> _demoShops = [
-    _DemoShopSpec(
-      key: 'team',
-      shopUid: 'demo_team',
-      name: 'Rizik Team',
-      nameBn: 'Rizik Team',
-      handle: '@rizik_team',
-      area: 'Dhaka',
-      avatar: '',
-      hours: '24/7 Support',
-      isOfficial: true,
-      sampleMessages: [
-        (
-          fromShop: true,
-          text:
-              'Welcome to Rizik Messenger! You can message nearby partner restaurants, claim Flash Rescue batches before closing, or donate surplus meals anytime.',
-        ),
-        (
-          fromShop: true,
-          text:
-              'Quick guide: Tap "New chat" to discover verified kitchens & community members, or tap "Message" on any food listing to coordinate pickup.',
-        ),
-      ],
-      autoReply:
-          'Auto-reply (demo): Thanks for reaching out to the Rizik Team! Explore active food batches on Home or invite friends from "Find people".',
-    ),
-    _DemoShopSpec(
-      key: 'biryani',
-      shopUid: 'demo_biryani',
-      name: 'Nawab Biryani House',
-      nameBn: 'নবাব বিরিয়ানি হাউস',
-      handle: '@nawab_biryani_demo',
-      area: 'Old Dhaka',
-      avatar: '/images/kacchi-biryani.jpg',
-      hours: '11:00 AM - 11:00 PM',
-      isOfficial: false,
-      sampleMessages: [
-        (
-          fromShop: true,
-          text:
-              'Assalamu Alaikum! We pack fresh leftover chicken & kacchi biryani boxes around 9:45 PM every evening.',
-        ),
-        (
-          fromShop: false,
-          text: 'Hi! Around what time can volunteers or neighbors pick up today?',
-        ),
-        (
-          fromShop: true,
-          text:
-              'Usually between 9:50 PM and 10:45 PM at the Chawkbazar side counter. Please bring your QR pickup code!',
-        ),
-      ],
-      autoReply:
-          'Auto-reply (demo): Thanks for checking Nawab Biryani House! Evening biryani surplus boxes are usually packed at 9:45 PM.',
-    ),
-    _DemoShopSpec(
-      key: 'mishti',
-      shopUid: 'demo_mishti',
-      name: 'Roshmalai Mishti Mahal',
-      nameBn: 'রসমালাই মিষ্টি মহল',
-      handle: '@roshmalai_demo',
-      area: 'Dhanmondi',
-      avatar: '/images/wedding-celebration-bd.jpg',
-      hours: '8:30 AM - 10:30 PM',
-      isOfficial: false,
-      sampleMessages: [
-        (
-          fromShop: true,
-          text:
-              'Hello! Today we have fresh sealed misti & nimki boxes available for community shelters before 9:30 PM.',
-        ),
-        (
-          fromShop: false,
-          text: 'Great! Are the containers sealed for transport?',
-        ),
-        (
-          fromShop: true,
-          text:
-              'Yes, packed in clean food-grade boxes ready for quick collection.',
-        ),
-      ],
-      autoReply:
-          'Auto-reply (demo): Roshmalai Mishti Mahal received your demo message! Freshly sealed sweet boxes are shared before closing.',
-    ),
-    _DemoShopSpec(
-      key: 'bakery',
-      shopUid: 'demo_bakery',
-      name: 'BanglaOven Artisan Bakery',
-      nameBn: 'বাংলাওভেন আর্টিজান বেকারি',
-      handle: '@banglaoven_demo',
-      area: 'Banani',
-      avatar: '/images/dhaka-bakery-bread.jpg',
-      hours: '7:30 AM - 10:00 PM',
-      isOfficial: false,
-      sampleMessages: [
-        (
-          fromShop: true,
-          text:
-              'Hi neighbor! Whole-wheat buns, sandwich loaves, and croissants are shared every night at 9:15 PM.',
-        ),
-        (
-          fromShop: true,
-          text:
-              'Tap Reply anytime to test demo instant messages and attachments.',
-        ),
-      ],
-      autoReply:
-          'Auto-reply (demo): BanglaOven Bakery got your message! Daily bakery surplus packs go live around 9:15 PM.',
-    ),
-  ];
 
   String _clampStr(String? val, int maxLen) {
     final trimmed = (val ?? '').trim();
@@ -279,6 +150,21 @@ class MessengerService {
     if (val is Timestamp) return val.toDate().toIso8601String();
     if (val is String && val.isNotEmpty) return val;
     return DateTime.now().toIso8601String();
+  }
+
+  String _parseDirectoryRole(dynamic raw) {
+    final s = (raw ?? 'user').toString();
+    const valid = {
+      'admin',
+      'restaurantOwner',
+      'donor',
+      'recipient',
+      'volunteer',
+      'ngo',
+      'organizer',
+      'user',
+    };
+    return valid.contains(s) ? s : 'user';
   }
 
   String generatePublicHandle(String displayName, String uid) {
@@ -351,16 +237,17 @@ class MessengerService {
     final dirRef = db.collection('userDirectory').doc(uid);
     final userRef = db.collection('users').doc(uid);
 
-    DocumentSnapshot<Map<String, dynamic>> dirSnap;
+    late DocumentSnapshot<Map<String, dynamic>> dirSnap;
     try {
-      dirSnap = await dirRef.get();
-    } catch (_) {
+      dirSnap = await getDocResilient(dirRef, db: db);
+    } catch (e) {
+      debugPrint('[MessengerService] Failed reading userDirectory/$uid: $e');
       return;
     }
 
     Map<String, dynamic>? existingUserData;
     try {
-      final userSnap = await userRef.get();
+      final userSnap = await getDocResilient(userRef, db: db);
       existingUserData = userSnap.data();
     } catch (_) {
       existingUserData = null;
@@ -436,6 +323,7 @@ class MessengerService {
       'verified': verified,
       'discoverable': discoverable,
       'online': online,
+      'isDemo': false,
       'lastSeen': FieldValue.serverTimestamp(),
       'updatedAt': FieldValue.serverTimestamp(),
     };
@@ -475,7 +363,8 @@ class MessengerService {
 
   Stream<DirectoryPageResult> watchDiscoverableDirectory(
     String myUid, {
-    int pageLimit = 25,
+    int pageLimit = 40,
+    void Function(FirestoreListenerError err)? onError,
   }) {
     final safeMyUid = _sanitizeId(myUid);
     final effLimit = pageLimit < 20 ? 20 : pageLimit;
@@ -491,15 +380,8 @@ class MessengerService {
         final data = d.data();
         final uid = (data['uid'] ?? d.id).toString();
         if (uid == safeMyUid) continue;
-        final rawRole = (data['role'] ?? 'user').toString();
-        const validRoles = {
-          'admin',
-          'restaurantOwner',
-          'donor',
-          'recipient',
-          'user',
-        };
-        final role = validRoles.contains(rawRole) ? rawRole : 'user';
+        final isDemo = data['isDemo'] == true || uid.startsWith('demo_');
+        final role = _parseDirectoryRole(data['role']);
         final lastSeenIso = _tsToIso(data['lastSeen']);
         final lastSeenDt = DateTime.tryParse(lastSeenIso);
         final recentlyActive = lastSeenDt != null &&
@@ -507,8 +389,8 @@ class MessengerService {
         list.add(UserDirectoryEntry(
           uid: uid,
           displayName: (data['displayName'] ?? 'Community Member').toString(),
-          handle: (data['handle'] ?? generatePublicHandle('member', uid))
-              .toString(),
+          handle:
+              (data['handle'] ?? generatePublicHandle('member', uid)).toString(),
           photoURL: data['photoURL']?.toString(),
           role: role,
           restaurantName: data['restaurantName']?.toString(),
@@ -516,8 +398,14 @@ class MessengerService {
           area: (data['area'] ?? 'Dhaka').toString(),
           verified: data['verified'] == true,
           discoverable: data['discoverable'] == true,
-          online: data['online'] == true && recentlyActive,
+          online: isDemo ? (data['online'] == true) : (data['online'] == true && recentlyActive),
           lastSeen: lastSeenIso,
+          isDemo: isDemo,
+          bio: data['bio']?.toString(),
+          bioBn: data['bioBn']?.toString(),
+          openingHours: data['openingHours']?.toString(),
+          rating: (data['rating'] as num?)?.toDouble(),
+          reviewCount: (data['reviewCount'] as num?)?.toInt(),
         ));
       }
       list.sort((a, b) {
@@ -525,12 +413,19 @@ class MessengerService {
         return b.lastSeen.compareTo(a.lastSeen);
       });
       return DirectoryPageResult(list, snap.docs.length >= effLimit);
+    }).handleError((e) {
+      final parsed = parseFirestoreListenerError(e, 'LIST', 'userDirectory');
+      onError?.(parsed);
+      throw parsed;
     });
   }
 
   // --- Block & Report Users ---
 
-  Stream<List<BlockedUserEntry>> watchMyBlockedUsers(String myUid) {
+  Stream<List<BlockedUserEntry>> watchMyBlockedUsers(
+    String myUid, {
+    void Function(FirestoreListenerError err)? onError,
+  }) {
     final safeUid = _sanitizeId(myUid);
     return db
         .collection('users')
@@ -546,6 +441,11 @@ class MessengerService {
           handle: data['blockedHandle']?.toString(),
         );
       }).toList();
+    }).handleError((e) {
+      final parsed =
+          parseFirestoreListenerError(e, 'LIST', 'users/$safeUid/blocked');
+      onError?.(parsed);
+      throw parsed;
     });
   }
 
@@ -621,142 +521,387 @@ class MessengerService {
     });
   }
 
-  // --- Starter / Demo Conversations (Seeded Once Per User) ---
+  // --- Isolated Client-Side Demo Persona Conversations (Strictly Under users/{uid}/demo*) ---
 
-  Future<void> seedStarterDemoConversationsOnce(
+  Future<StarterConvSeedResult> seedStarterDemoConversationsOnce(
     fb_auth.User fbUser,
-    AppUser appUser,
-  ) {
-    final existing = _inFlightStarterSeed[fbUser.uid];
-    if (existing != null) return existing;
+    AppUser appUser, {
+    bool forceCheck = false,
+  }) {
+    if (!forceCheck) {
+      final existing = _inFlightStarterSeed[fbUser.uid];
+      if (existing != null) return existing;
+    }
 
-    final future =
-        _doSeedStarterDemoConversationsOnce(fbUser, appUser).whenComplete(() {
+    final future = _doSeedStarterDemoConversationsOnce(
+      fbUser,
+      appUser,
+      forceCheck: forceCheck,
+    ).whenComplete(() {
       _inFlightStarterSeed.remove(fbUser.uid);
     });
-    _inFlightStarterSeed[fbUser.uid] = future;
+    if (!forceCheck) {
+      _inFlightStarterSeed[fbUser.uid] = future;
+    }
     return future;
   }
 
-  Future<void> _doSeedStarterDemoConversationsOnce(
+  Future<StarterConvSeedResult> _doSeedStarterDemoConversationsOnce(
     fb_auth.User fbUser,
-    AppUser appUser,
-  ) async {
+    AppUser _, {
+    bool forceCheck = false,
+  }) async {
     final uid = _sanitizeId(fbUser.uid);
-    final userRef = db.collection('users').doc(uid);
-
-    DocumentSnapshot<Map<String, dynamic>> userSnap;
-    try {
-      userSnap = await userRef.get();
-    } catch (_) {
-      return;
-    }
-    if (!userSnap.exists) return;
-    if (userSnap.data()?['starterSeeded'] == true) return;
-
-    final myNameRaw = _clampStr(
-      appUser.name.isNotEmpty ? appUser.name : fbUser.displayName,
-      100,
-    );
-    final myName = myNameRaw.isNotEmpty ? myNameRaw : 'Community Member';
-    final handleRaw = _clampStr(
-      userSnap.data()?['handle']?.toString() ?? appUser.handle,
-      40,
-    );
-    final myHandle =
-        handleRaw.isNotEmpty ? handleRaw : generatePublicHandle(myName, uid);
-
-    for (final shop in _demoShops) {
-      final convId = _sanitizeId('demo_${uid}_${shop.key}');
-      final lastSample = shop.sampleMessages.last;
-
+    final localSeedFlag = 'rizik_demo_team_v2_$uid';
+    if (!forceCheck) {
       try {
-        await db.collection('conversations').doc(convId).set({
-          'conversationKind': 'demo',
-          'participants': [uid],
-          'uidA': uid,
-          'uidB': shop.shopUid,
-          'donorId': shop.shopUid,
-          'recipientId': uid,
-          'listingId': 'demo_listing_${shop.key}',
-          'donorName': shop.name,
-          'recipientName': myName,
-          'listingTitle': shop.isOfficial
-              ? 'Official Welcome & Guide'
-              : '${shop.area} · Sample Partner',
-          'isDemo': true,
-          'demoShopKey': shop.key,
-          'demoOwnerUid': uid,
-          'participantProfiles': {
-            uid: {
-              'displayName': myName,
-              'handle': myHandle,
-              'role': appUser.isAdmin ? 'admin' : appUser.accountType.name,
-              'area': appUser.area.isNotEmpty ? appUser.area : 'Dhaka',
-              'verified': appUser.verified,
-            },
-            shop.shopUid: {
-              'displayName': shop.name,
-              'handle': shop.handle,
-              'photoURL': shop.avatar.isNotEmpty ? shop.avatar : null,
-              'role': shop.isOfficial ? 'admin' : 'restaurantOwner',
-              'restaurantName': shop.name,
-              'area': shop.area,
-              'verified': true,
-              'isOfficial': shop.isOfficial,
-            },
-          },
-          'lastMessage': _clampStr(lastSample.text, 500),
-          'lastMessageType': 'text',
-          'lastMessageSenderId': lastSample.fromShop ? shop.shopUid : uid,
-          'lastMessageAt': FieldValue.serverTimestamp(),
-          'unreadCount': {uid: 1},
-          'mutedBy': <String, dynamic>{},
-          'archivedBy': <String, dynamic>{},
-          'deletedFor': <String, dynamic>{},
-          'typingBy': <String, dynamic>{},
-          'createdAt': FieldValue.serverTimestamp(),
-          'updatedAt': FieldValue.serverTimestamp(),
-        });
-
-        final batch = db.batch();
-        for (var i = 0; i < shop.sampleMessages.length; i++) {
-          final sample = shop.sampleMessages[i];
-          final msgId = _sanitizeId(
-            'demo_msg_${shop.key}_${i}_${DateTime.now().millisecondsSinceEpoch}',
-          );
-          final msgRef = db
-              .collection('conversations')
-              .doc(convId)
-              .collection('messages')
-              .doc(msgId);
-          batch.set(msgRef, {
-            'conversationId': convId,
-            'participants': [uid],
-            'donorId': shop.shopUid,
-            'recipientId': uid,
-            'senderId': sample.fromShop ? shop.shopUid : uid,
-            'senderName': sample.fromShop ? shop.name : myName,
-            'text': _clampStr(sample.text, 2000),
-            'messageType': 'text',
-            'deliveredTo': [uid],
-            'readBy': sample.fromShop ? <String>[] : <String>[uid],
-            'deletedFor': <String>[],
-            'status': sample.fromShop ? 'delivered' : 'read',
-            'isDemoAutoReply': sample.fromShop,
-            'createdAt': FieldValue.serverTimestamp(),
-          });
+        final prefs = await SharedPreferences.getInstance();
+        if (prefs.getString(localSeedFlag) == '1') {
+          return const StarterConvSeedResult(status: 'already_present');
         }
-        await batch.commit();
       } catch (_) {}
     }
 
+    final convId = rizikTeamPersona.id;
+    final teamConvRef = db
+        .collection('users')
+        .doc(uid)
+        .collection('demoConversations')
+        .doc(convId);
+
+    var convExists = false;
+    var existingMsgCount = 0;
     try {
-      await userRef.update({
-        'starterSeeded': true,
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
+      final results = await Future.wait([
+        getDocResilient(teamConvRef, db: db),
+        getDocsResilient(
+          db
+              .collection('users')
+              .doc(uid)
+              .collection('demoMessages')
+              .where('conversationId', isEqualTo: convId)
+              .limit(5),
+          db: db,
+        ),
+      ]);
+      final existingConv = results[0] as DocumentSnapshot<Map<String, dynamic>>;
+      final existingMsgs = results[1] as QuerySnapshot<Map<String, dynamic>>;
+      convExists = existingConv.exists;
+      existingMsgCount = existingMsgs.size;
+      if (convExists && existingMsgCount > 0) {
+        try {
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setString(localSeedFlag, '1');
+        } catch (_) {}
+        return const StarterConvSeedResult(status: 'already_present');
+      }
+    } catch (err) {
+      debugPrint(
+        '[MessengerService] Could not inspect starter demo_team thread: $err',
+      );
+      return StarterConvSeedResult(status: 'error', error: err.toString());
+    }
+
+    const welcomeMsgs = [
+      'Welcome to Rizik! Join Community Rooms above, tap "New chat" to message partner kitchens & neighbors, or message demo personas anytime.',
+      'রিজিক-এ স্বাগতম! উপরে কমিউনিটি রুমে যোগ দিন, "নতুন চ্যাট" থেকে কাছের রেস্তোরাঁ বা প্রতিবেশীর সাথে চ্যাট করুন। এটি একটি ডেমো সহায়তা থ্রেড।',
+    ];
+
+    try {
+      final batch = db.batch();
+      if (!convExists) {
+        batch.set(teamConvRef, {
+          'personaId': rizikTeamPersona.id,
+          'personaName': rizikTeamPersona.displayName,
+          'personaHandle': rizikTeamPersona.handle,
+          'personaRole': rizikTeamPersona.role,
+          'personaArea': rizikTeamPersona.area,
+          'personaAvatar': null,
+          'personaVerified': true,
+          'isOfficial': true,
+          'lastMessage': _clampStr(welcomeMsgs[1], 500),
+          'lastMessageType': 'text',
+          'lastMessageSenderId': rizikTeamPersona.id,
+          'lastMessageAt': FieldValue.serverTimestamp(),
+          'unreadCount': 1,
+          'isMuted': false,
+          'isArchived': false,
+          'createdAt': FieldValue.serverTimestamp(),
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+      }
+
+      if (existingMsgCount == 0) {
+        for (var index = 0; index < welcomeMsgs.length; index++) {
+          final msgId = _sanitizeId('demo_team_welcome_$index');
+          batch.set(
+            db.collection('users').doc(uid).collection('demoMessages').doc(msgId),
+            {
+              'conversationId': convId,
+              'personaId': rizikTeamPersona.id,
+              'senderId': rizikTeamPersona.id,
+              'senderName': rizikTeamPersona.displayName,
+              'text': _clampStr(welcomeMsgs[index], 2000),
+              'messageType': 'text',
+              'reactions': <String, dynamic>{},
+              'isDemoAutoReply': true,
+              'createdAt': FieldValue.serverTimestamp(),
+            },
+          );
+        }
+      }
+
+      await batch.commit();
+
+      try {
+        await db.collection('users').doc(uid).update({
+          'starterSeeded': true,
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+      } catch (_) {}
+
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString(localSeedFlag, '1');
+      } catch (_) {}
+
+      return StarterConvSeedResult(
+        status: convExists ? 'repaired' : 'created',
+      );
+    } catch (err) {
+      debugPrint('[MessengerService] Starter demo_team seed skipped: $err');
+      return StarterConvSeedResult(status: 'error', error: err.toString());
+    }
+  }
+
+  DemoPersonaSpec _buildPersonaSpecFromEntry(UserDirectoryEntry entry) {
+    final known = allDemoPersonasMap[entry.uid];
+    if (known != null) return known;
+    return DemoPersonaSpec(
+      id: entry.uid,
+      displayName: entry.restaurantName ?? entry.displayName,
+      displayNameBn: entry.restaurantName ?? entry.displayName,
+      handle: entry.handle,
+      role: entry.role,
+      avatar: entry.photoURL,
+      restaurantName: entry.restaurantName,
+      restaurantType: entry.restaurantType,
+      area: entry.area.isNotEmpty ? entry.area : 'Dhaka',
+      verified: entry.verified,
+      bio: entry.bio ?? '${entry.displayName} in ${entry.area}',
+      bioBn: entry.bioBn ?? entry.bio ?? '${entry.area} এলাকার ${entry.displayName}',
+      openingHours: entry.openingHours,
+      rating: entry.rating,
+      reviewCount: entry.reviewCount,
+      online: entry.online,
+      categoryKey: entry.role == 'volunteer' ? 'volunteer' : 'team',
+    );
+  }
+
+  DemoPersonaSpec _buildPersonaSpecFromConversation(Conversation conv) {
+    final personaId = conv.demoPersonaId ?? conv.peerUid ?? conv.id;
+    final known = allDemoPersonasMap[personaId];
+    if (known != null) return known;
+    return DemoPersonaSpec(
+      id: personaId,
+      displayName: conv.donorName.isNotEmpty ? conv.donorName : 'Demo Partner',
+      displayNameBn:
+          conv.donorName.isNotEmpty ? conv.donorName : 'ডেমো পার্টনার',
+      handle: conv.peerHandle ?? '@demo_partner',
+      role: _parseDirectoryRole(conv.peerRole),
+      avatar: conv.donorLogoUrl,
+      restaurantName: conv.peerRestaurantName,
+      area: conv.peerArea ?? 'Dhaka',
+      verified: conv.peerVerified ?? false,
+      bio: conv.peerBio ?? '',
+      bioBn: conv.peerBioBn ?? '',
+      openingHours: conv.donorHours,
+      rating: conv.peerRating,
+      reviewCount: conv.peerReviewCount,
+      online: true,
+      isOfficial: conv.isOfficial,
+      categoryKey: 'team',
+    );
+  }
+
+  Future<String> getOrCreateDemoPersonaConversation(
+    AppUser me,
+    UserDirectoryEntry target, {
+    String lang = 'en',
+  }) async {
+    final myUid = _sanitizeId(me.id);
+    final spec = _buildPersonaSpecFromEntry(target);
+    final convId = _sanitizeId(spec.id);
+    final convRef = db
+        .collection('users')
+        .doc(myUid)
+        .collection('demoConversations')
+        .doc(convId);
+
+    try {
+      final existing = await getDocResilient(convRef, db: db);
+      if (existing.exists) {
+        await convRef.update({
+          'isArchived': false,
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+        return convId;
+      }
     } catch (_) {}
+
+    final greetingText = lang == 'bn'
+        ? '${spec.displayNameBn}-এ স্বাগতম! (${spec.area}) — ${spec.bioBn}'
+        : 'Hi! Welcome to ${spec.displayName} (${spec.area}). ${spec.bio}';
+
+    final batch = db.batch();
+    batch.set(convRef, {
+      'personaId': spec.id,
+      'personaName': _clampStr(spec.displayName, 120),
+      'personaHandle': _clampStr(spec.handle, 40),
+      'personaRole': spec.role,
+      'personaArea':
+          _clampStr(spec.area, 80).isNotEmpty ? _clampStr(spec.area, 80) : 'Dhaka',
+      'personaAvatar':
+          (spec.avatar != null && spec.avatar!.length <= 248000) ? spec.avatar : null,
+      'personaVerified': spec.verified,
+      'isOfficial': spec.isOfficial,
+      'lastMessage': _clampStr(greetingText, 500),
+      'lastMessageType': 'text',
+      'lastMessageSenderId': spec.id,
+      'lastMessageAt': FieldValue.serverTimestamp(),
+      'unreadCount': 0,
+      'isMuted': false,
+      'isArchived': false,
+      'createdAt': FieldValue.serverTimestamp(),
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+
+    final greetMsgId = _sanitizeId(
+      'demo_greet_${convId}_${DateTime.now().millisecondsSinceEpoch}',
+    );
+    batch.set(
+      db.collection('users').doc(myUid).collection('demoMessages').doc(greetMsgId),
+      {
+        'conversationId': convId,
+        'personaId': spec.id,
+        'senderId': spec.id,
+        'senderName': _clampStr(spec.displayName, 120),
+        'text': _clampStr(greetingText, 2000),
+        'messageType': 'text',
+        'reactions': <String, dynamic>{},
+        'isDemoAutoReply': true,
+        'createdAt': FieldValue.serverTimestamp(),
+      },
+    );
+
+    await batch.commit();
+    return convId;
+  }
+
+  Conversation _mapDemoConversationDoc(
+    String id,
+    Map<String, dynamic> data,
+    String safeUid,
+  ) {
+    final personaId = (data['personaId'] ?? id).toString();
+    final spec = allDemoPersonasMap[personaId];
+    final personaName =
+        (data['personaName'] ?? spec?.displayName ?? 'Demo Partner').toString();
+    final personaAvatar = data['personaAvatar']?.toString() ?? spec?.avatar;
+    final personaRole =
+        _parseDirectoryRole(data['personaRole'] ?? spec?.role ?? 'restaurantOwner');
+    final personaArea =
+        (data['personaArea'] ?? spec?.area ?? 'Dhaka').toString();
+    final personaHandle =
+        (data['personaHandle'] ?? spec?.handle ?? '@demo_rizik').toString();
+    final lastMsgAt = _tsToIso(data['lastMessageAt'] ?? data['updatedAt']);
+
+    return Conversation(
+      id: id,
+      listingId: '',
+      claimId: '',
+      donorId: personaId,
+      recipientId: safeUid,
+      uidA: safeUid,
+      uidB: personaId,
+      participants: [safeUid],
+      conversationKind: 'demo',
+      donorName: personaName,
+      donorLogoUrl: personaAvatar,
+      donorVerified: data['personaVerified'] == true || (spec?.verified == true),
+      donorArea: personaArea,
+      donorHours: spec?.openingHours,
+      peerOnline: spec?.online ?? true,
+      peerLastSeen: null,
+      peerTyping: false,
+      peerUid: personaId,
+      peerHandle: personaHandle,
+      peerRole: personaRole,
+      peerVerified: data['personaVerified'] == true || (spec?.verified == true),
+      peerArea: personaArea,
+      peerRestaurantName: spec?.restaurantName ?? personaName,
+      peerBio: spec?.bio,
+      peerBioBn: spec?.bioBn,
+      peerRating: spec?.rating,
+      peerReviewCount: spec?.reviewCount,
+      recipientName: 'You',
+      recipientLogoUrl: null,
+      listingTitle: spec?.isOfficial == true
+          ? 'Official Guide · Demo'
+          : '$personaArea · Demo Account',
+      listingPhoto: (personaAvatar != null && personaAvatar.isNotEmpty)
+          ? personaAvatar
+          : '/images/kacchi-biryani.jpg',
+      pickupStart: lastMsgAt,
+      pickupEnd: lastMsgAt,
+      claimStatus: ClaimStatus.requested,
+      isDirect: true,
+      isStarter: true,
+      isDemo: true,
+      demoPersonaId: personaId,
+      demoShopKey: spec?.categoryKey,
+      isOfficial: data['isOfficial'] == true || (spec?.isOfficial == true),
+      isMuted: data['isMuted'] == true,
+      isArchived: data['isArchived'] == true,
+      isFirestoreBacked: true,
+      lastMessage: (data['lastMessage'] ?? '').toString(),
+      lastMessageType: mapMessageTypeFromFirestore(data['lastMessageType']),
+      lastMessageSenderId: data['lastMessageSenderId']?.toString(),
+      lastMessageAt: lastMsgAt,
+      unreadCount: (data['unreadCount'] as num?)?.toInt() ?? 0,
+      isBlocked: false,
+      blockedByMe: false,
+      createdAt: _tsToIso(data['createdAt']),
+      updatedAt: _tsToIso(data['updatedAt']),
+    );
+  }
+
+  Stream<List<Conversation>> watchMyDemoConversations(
+    String myUid, {
+    void Function(FirestoreListenerError err)? onError,
+  }) {
+    final safeUid = _sanitizeId(myUid);
+    return db
+        .collection('users')
+        .doc(safeUid)
+        .collection('demoConversations')
+        .snapshots()
+        .map((snap) {
+      final list = snap.docs
+          .map((d) => _mapDemoConversationDoc(d.id, d.data(), safeUid))
+          .toList()
+        ..sort((a, b) => (b.lastMessageAt ?? b.updatedAt)
+            .compareTo(a.lastMessageAt ?? a.updatedAt));
+      return list;
+    }).handleError((e) {
+      final parsed = parseFirestoreListenerError(
+        e,
+        'LIST',
+        'users/$safeUid/demoConversations',
+      );
+      onError?.(parsed);
+      throw parsed;
+    });
   }
 
   // --- Real-Time 1-to-1 Messenger Conversations ---
@@ -772,18 +917,9 @@ class MessengerService {
         (data['deletedFor'] as Map?)?.cast<String, dynamic>() ?? {};
     if (deletedForMap[myUid] == true) return null;
 
-    final isDemo = data['isDemo'] == true;
-    final demoShopKeyRaw = data['demoShopKey']?.toString();
-    final _DemoShopSpec? demoSpec = demoShopKeyRaw != null
-        ? _demoShops.cast<_DemoShopSpec?>().firstWhere(
-              (s) => s?.key == demoShopKeyRaw,
-              orElse: () => null,
-            )
-        : null;
-
     final uidA = (data['uidA'] ?? data['donorId'] ?? myUid).toString();
     final uidB = (data['uidB'] ?? data['recipientId'] ?? myUid).toString();
-    final peerUid = isDemo ? uidB : (uidA == myUid ? uidB : uidA);
+    final peerUid = uidA == myUid ? uidB : uidA;
 
     final profiles =
         (data['participantProfiles'] as Map?)?.cast<String, dynamic>() ?? {};
@@ -791,8 +927,7 @@ class MessengerService {
         (profiles[peerUid] as Map?)?.cast<String, dynamic>() ?? {};
     final liveDir = directoryMap[peerUid];
 
-    final peerName = demoSpec?.name ??
-        liveDir?.restaurantName ??
+    final peerName = liveDir?.restaurantName ??
         liveDir?.displayName ??
         ((peerMeta['restaurantName'] is String &&
                 (peerMeta['restaurantName'] as String).isNotEmpty)
@@ -806,23 +941,11 @@ class MessengerService {
             ? (data['donorName'] ?? 'Community Member').toString()
             : (data['recipientName'] ?? 'Community Member').toString());
 
-    final peerAvatar = (demoSpec?.avatar.isNotEmpty == true)
-        ? demoSpec!.avatar
-        : liveDir?.photoURL ?? peerMeta['photoURL']?.toString();
-
-    final peerRole = demoSpec != null
-        ? (demoSpec.isOfficial ? 'admin' : 'donor')
-        : (liveDir?.role ?? peerMeta['role']?.toString() ?? 'user');
-
-    final peerVerified = demoSpec != null
-        ? true
-        : (liveDir?.verified ?? (peerMeta['verified'] == true));
-
-    final peerArea =
-        demoSpec?.area ?? liveDir?.area ?? peerMeta['area']?.toString() ?? 'Dhaka';
-
-    final peerHandle = demoSpec?.handle ??
-        liveDir?.handle ??
+    final peerAvatar = liveDir?.photoURL ?? peerMeta['photoURL']?.toString();
+    final peerRole = liveDir?.role ?? peerMeta['role']?.toString() ?? 'user';
+    final peerVerified = liveDir?.verified ?? (peerMeta['verified'] == true);
+    final peerArea = liveDir?.area ?? peerMeta['area']?.toString() ?? 'Dhaka';
+    final peerHandle = liveDir?.handle ??
         peerMeta['handle']?.toString() ??
         generatePublicHandle(peerName, peerUid);
 
@@ -833,7 +956,7 @@ class MessengerService {
         (data['archivedBy'] as Map?)?.cast<String, dynamic>() ?? {};
     final typingMap = (data['typingBy'] as Map?)?.cast<String, dynamic>() ?? {};
 
-    final blockedByMe = !isDemo && blockedSet.contains(peerUid);
+    final blockedByMe = blockedSet.contains(peerUid);
     final lastMsgAt = _tsToIso(data['lastMessageAt'] ?? data['updatedAt']);
     final listingId = (data['listingId'] ?? '').toString();
 
@@ -857,46 +980,40 @@ class MessengerService {
               ?.map((e) => e.toString())
               .toList() ??
           [uidA, uidB],
-      conversationKind: isDemo
-          ? 'demo'
-          : (data['conversationKind'] == 'pickup' ? 'pickup' : 'direct'),
+      conversationKind:
+          data['conversationKind'] == 'pickup' ? 'pickup' : 'direct',
       donorName: data['donorId']?.toString() == peerUid
           ? peerName
           : (data['donorName'] ?? peerName).toString(),
       donorLogoUrl: peerAvatar,
       donorVerified: peerVerified,
       donorArea: peerArea,
-      donorHours: demoSpec?.hours,
-      peerOnline: isDemo ? true : (liveDir?.online ?? false),
-      peerLastSeen: isDemo ? null : liveDir?.lastSeen,
-      peerTyping: !isDemo && typingMap[peerUid] == true,
+      peerOnline: liveDir?.online ?? false,
+      peerLastSeen: liveDir?.lastSeen,
+      peerTyping: typingMap[peerUid] == true,
       peerUid: peerUid,
       peerHandle: peerHandle,
       peerRole: peerRole,
       peerVerified: peerVerified,
       peerArea: peerArea,
-      peerRestaurantName: liveDir?.restaurantName ?? demoSpec?.name,
+      peerRestaurantName: liveDir?.restaurantName,
       recipientName: data['recipientId']?.toString() == peerUid
           ? peerName
           : (data['recipientName'] ?? 'Neighbor').toString(),
       recipientLogoUrl: peerAvatar,
       listingTitle: (data['listingTitle']?.toString().isNotEmpty == true)
           ? data['listingTitle'].toString()
-          : (demoSpec != null
-              ? '${demoSpec.area} · ${demoSpec.isOfficial ? 'Official' : 'Demo Partner'}'
-              : peerHandle),
+          : peerHandle,
       listingPhoto: (peerAvatar != null && peerAvatar.isNotEmpty)
           ? peerAvatar
           : '/images/kacchi-biryani.jpg',
       pickupStart: lastMsgAt,
       pickupEnd: lastMsgAt,
       claimStatus: ClaimStatus.requested,
-      isDirect:
-          listingId.isEmpty || listingId.startsWith('direct_') || isDemo,
-      isStarter: isDemo,
-      isDemo: isDemo,
-      demoShopKey: demoShopKeyRaw,
-      isOfficial: demoSpec?.isOfficial == true || peerMeta['isOfficial'] == true,
+      isDirect: listingId.isEmpty || listingId.startsWith('direct_'),
+      isStarter: false,
+      isDemo: false,
+      isOfficial: peerMeta['isOfficial'] == true,
       isMuted: mutedMap[myUid] == true,
       isArchived: archivedMap[myUid] == true,
       isFirestoreBacked: true,
@@ -916,50 +1033,105 @@ class MessengerService {
     String myUid, {
     required Set<String> Function() getBlockedSet,
     required Map<String, UserDirectoryEntry> Function() getDirectoryMap,
+    void Function(FirestoreListenerError err)? onError,
   }) {
     final safeUid = _sanitizeId(myUid);
-    return db
-        .collection('conversations')
-        .where('participants', arrayContains: safeUid)
-        .snapshots()
-        .map((snap) {
-      final blockedSet = getBlockedSet();
-      final directoryMap = getDirectoryMap();
-      final mapped = <Conversation>[];
-      for (final d in snap.docs) {
-        final conv = _mapFirestoreConversation(
-          d.id,
-          d.data(),
-          safeUid,
-          blockedSet,
-          directoryMap,
-        );
-        if (conv != null) mapped.add(conv);
+    late StreamController<List<Conversation>> controller;
+    StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? realSub;
+    StreamSubscription<List<Conversation>>? demoSub;
+
+    var realConvs = <Conversation>[];
+    var demoConvs = <Conversation>[];
+
+    void emitMerged() {
+      if (controller.isClosed) return;
+      final map = <String, Conversation>{};
+      for (final c in demoConvs) {
+        map[c.id] = c;
       }
-      mapped.sort((a, b) =>
-          (b.lastMessageAt ?? b.updatedAt)
-              .compareTo(a.lastMessageAt ?? a.updatedAt));
-      return mapped;
-    });
+      for (final c in realConvs) {
+        map[c.id] = c;
+      }
+      final merged = map.values.toList()
+        ..sort((a, b) => (b.lastMessageAt ?? b.updatedAt)
+            .compareTo(a.lastMessageAt ?? a.updatedAt));
+      controller.add(merged);
+    }
+
+    controller = StreamController<List<Conversation>>(
+      onListen: () {
+        realSub = db
+            .collection('conversations')
+            .where('participants', arrayContains: safeUid)
+            .snapshots()
+            .listen(
+          (snap) {
+            final blockedSet = getBlockedSet();
+            final directoryMap = getDirectoryMap();
+            final mapped = <Conversation>[];
+            for (final d in snap.docs) {
+              final conv = _mapFirestoreConversation(
+                d.id,
+                d.data(),
+                safeUid,
+                blockedSet,
+                directoryMap,
+              );
+              if (conv != null) mapped.add(conv);
+            }
+            realConvs = mapped;
+            emitMerged();
+          },
+          onError: (e, st) {
+            final parsed =
+                parseFirestoreListenerError(e, 'LIST', 'conversations');
+            onError?.(parsed);
+            if (!controller.isClosed) controller.addError(parsed, st);
+          },
+        );
+
+        demoSub = watchMyDemoConversations(
+          safeUid,
+          onError: onError,
+        ).listen(
+          (list) {
+            demoConvs = list;
+            emitMerged();
+          },
+          onError: (e, st) {
+            if (!controller.isClosed) controller.addError(e, st);
+          },
+        );
+      },
+      onCancel: () async {
+        await realSub?.cancel();
+        await demoSub?.cancel();
+      },
+    );
+
+    return controller.stream;
   }
 
   Future<String> getOrCreateDirectConversation(
     AppUser me,
     UserDirectoryEntry target, {
     Listing? initialListing,
+    String lang = 'en',
   }) async {
+    if (target.isDemo || target.uid.startsWith('demo_')) {
+      return getOrCreateDemoPersonaConversation(me, target, lang: lang);
+    }
+
     final myUid = _sanitizeId(me.id);
     final targetUid = _sanitizeId(target.uid);
     if (myUid == targetUid) {
       throw Exception('Cannot start a chat with yourself');
     }
 
-    final myBlockSnap = await db
-        .collection('users')
-        .doc(myUid)
-        .collection('blocked')
-        .doc(targetUid)
-        .get();
+    final myBlockSnap = await getDocResilient(
+      db.collection('users').doc(myUid).collection('blocked').doc(targetUid),
+      db: db,
+    );
     if (myBlockSnap.exists) {
       throw Exception(
         'You blocked this user. Unblock them in Account Settings to send messages.',
@@ -971,7 +1143,7 @@ class MessengerService {
     final uidA = sorted[0];
     final uidB = sorted[1];
     final convRef = db.collection('conversations').doc(convId);
-    final existingSnap = await convRef.get();
+    final existingSnap = await getDocResilient(convRef, db: db);
 
     final myDisplayName = me.accountType == AccountType.restaurantOwner
         ? (me.restaurant?.restaurantName ??
@@ -1108,15 +1280,13 @@ class MessengerService {
     final safeDonorId = _sanitizeId(donorId);
     UserDirectoryEntry? target;
     try {
-      final snap = await db.collection('userDirectory').doc(safeDonorId).get();
+      final snap = await getDocResilient(
+        db.collection('userDirectory').doc(safeDonorId),
+        db: db,
+      );
       if (snap.exists && snap.data() != null) {
         final d = snap.data()!;
-        final roleRaw = d['role']?.toString();
-        final role = (roleRaw == 'restaurantOwner' ||
-                roleRaw == 'admin' ||
-                roleRaw == 'donor')
-            ? roleRaw!
-            : 'restaurantOwner';
+        final role = _parseDirectoryRole(d['role']);
         target = UserDirectoryEntry(
           uid: (d['uid'] ?? safeDonorId).toString(),
           displayName: (d['displayName'] ?? donorName).toString(),
@@ -1130,6 +1300,7 @@ class MessengerService {
           discoverable: d['discoverable'] != false,
           online: d['online'] == true,
           lastSeen: _tsToIso(d['lastSeen']),
+          isDemo: d['isDemo'] == true || safeDonorId.startsWith('demo_'),
         );
       }
     } catch (_) {}
@@ -1146,6 +1317,7 @@ class MessengerService {
       discoverable: true,
       online: false,
       lastSeen: DateTime.now().toIso8601String(),
+      isDemo: safeDonorId.startsWith('demo_'),
     );
 
     return getOrCreateDirectConversation(me, target, initialListing: listing);
@@ -1235,9 +1407,39 @@ class MessengerService {
     String myUid, {
     String? peerUid,
     int pageSize = 30,
+    bool isDemo = false,
+    void Function(FirestoreListenerError err)? onError,
   }) {
     final safeConvId = _sanitizeId(conversationId);
     final safeMyUid = _sanitizeId(myUid);
+
+    if (isDemo || safeConvId.startsWith('demo_')) {
+      return db
+          .collection('users')
+          .doc(safeMyUid)
+          .collection('demoMessages')
+          .where('conversationId', isEqualTo: safeConvId)
+          .snapshots()
+          .map((snap) {
+        final all = <ChatMessage>[];
+        for (final d in snap.docs) {
+          final m = _mapFirestoreChatMessage(d.id, d.data(), safeMyUid);
+          if (m != null) all.add(m.copyWith(status: 'read'));
+        }
+        all.sort((a, b) => a.sentAt.compareTo(b.sentAt));
+        final hasMore = all.length > pageSize;
+        final sliced = hasMore ? all.sublist(all.length - pageSize) : all;
+        return MessengerMessagesPage(sliced, hasMore);
+      }).handleError((e) {
+        final parsed = parseFirestoreListenerError(
+          e,
+          'LIST',
+          'users/$safeMyUid/demoMessages',
+        );
+        onError?.(parsed);
+        throw parsed;
+      });
+    }
 
     late StreamController<MessengerMessagesPage> controller;
     StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? sub;
@@ -1261,9 +1463,13 @@ class MessengerService {
       if (fallbackMode) {
         final hasMore = all.length > pageSize;
         final sliced = hasMore ? all.sublist(all.length - pageSize) : all;
-        controller.add(MessengerMessagesPage(sliced, hasMore));
+        if (!controller.isClosed) {
+          controller.add(MessengerMessagesPage(sliced, hasMore));
+        }
       } else {
-        controller.add(MessengerMessagesPage(all, docs.length >= pageSize));
+        if (!controller.isClosed) {
+          controller.add(MessengerMessagesPage(all, docs.length >= pageSize));
+        }
       }
     }
 
@@ -1280,7 +1486,13 @@ class MessengerService {
           .listen(
             (snap) => emitDocs(snap.docs, true),
             onError: (e, st) {
-              if (!controller.isClosed) controller.addError(e, st);
+              final parsed = parseFirestoreListenerError(
+                e,
+                'LIST',
+                'conversations/$safeConvId/messages',
+              );
+              onError?.(parsed);
+              if (!controller.isClosed) controller.addError(parsed, st);
             },
           );
     }
@@ -1298,18 +1510,21 @@ class MessengerService {
             .listen(
               (snap) => emitDocs(snap.docs, false),
               onError: (e, st) {
-                final msg = e.toString().toLowerCase();
-                if (msg.contains('index') || msg.contains('failed-precondition')) {
+                final parsed = parseFirestoreListenerError(
+                  e,
+                  'LIST',
+                  'conversations/$safeConvId/messages',
+                );
+                if (parsed.isIndexError) {
                   attachFallback();
-                } else if (!controller.isClosed) {
-                  controller.addError(e, st);
+                  return;
                 }
+                onError?.(parsed);
+                if (!controller.isClosed) controller.addError(parsed, st);
               },
             );
       },
-      onCancel: () async {
-        await sub?.cancel();
-      },
+      onCancel: () async => await sub?.cancel(),
     );
 
     return controller.stream;
@@ -1379,6 +1594,57 @@ class MessengerService {
     } catch (_) {}
   }
 
+  Future<void> triggerDemoPersonaAutoReply({
+    required String myUid,
+    required Conversation conversation,
+    required String userText,
+    String lang = 'en',
+    bool markUnread = false,
+  }) async {
+    final safeUid = _sanitizeId(myUid);
+    final convId = _sanitizeId(conversation.id);
+    final spec = _buildPersonaSpecFromConversation(conversation);
+    final replyText = generatePersonaAutoReply(spec, userText, lang: lang);
+
+    final rand = _rng.nextInt(9000) + 1000;
+    final replyId = _sanitizeId(
+      'demo_ar_${DateTime.now().millisecondsSinceEpoch}_$rand',
+    );
+    final batch = db.batch();
+    batch.set(
+      db.collection('users').doc(safeUid).collection('demoMessages').doc(replyId),
+      {
+        'conversationId': convId,
+        'personaId': spec.id,
+        'senderId': spec.id,
+        'senderName': _clampStr(spec.displayName, 120),
+        'text': _clampStr(replyText, 2000),
+        'messageType': 'text',
+        'reactions': <String, dynamic>{},
+        'isDemoAutoReply': true,
+        'createdAt': FieldValue.serverTimestamp(),
+      },
+    );
+    batch.update(
+      db
+          .collection('users')
+          .doc(safeUid)
+          .collection('demoConversations')
+          .doc(convId),
+      {
+        'lastMessage': _clampStr(replyText, 500),
+        'lastMessageType': 'text',
+        'lastMessageSenderId': spec.id,
+        'lastMessageAt': FieldValue.serverTimestamp(),
+        'unreadCount': markUnread ? FieldValue.increment(1) : 0,
+        'updatedAt': FieldValue.serverTimestamp(),
+      },
+    );
+    try {
+      await batch.commit();
+    } catch (_) {}
+  }
+
   Future<void> sendMessengerMessage({
     required Conversation conversation,
     required String senderId,
@@ -1397,15 +1663,10 @@ class MessengerService {
     String? replyToId,
     String? replyToText,
     String? forwardedFrom,
+    String lang = 'en',
   }) async {
     final convId = _sanitizeId(conversation.id);
     final myUid = _sanitizeId(senderId);
-    final participants = conversation.participants.isNotEmpty
-        ? conversation.participants.map(_sanitizeId).toList()
-        : conversation.isDemo
-            ? [myUid]
-            : [myUid, _sanitizeId(conversation.peerUid ?? conversation.donorId)];
-
     final fsType = mapMessageTypeToFirestore(messageType);
     final clampedText = _clampStr(text, 2000);
     final cleanText = clampedText.isNotEmpty
@@ -1422,6 +1683,90 @@ class MessengerService {
 
     final safeMedia =
         (mediaUrl != null && mediaUrl.length <= 445000) ? mediaUrl : null;
+    final previewText = fsType == 'image'
+        ? '📷 Photo'
+        : fsType == 'file'
+            ? '📎 ${_clampStr(fileName, 60).isNotEmpty ? _clampStr(fileName, 60) : 'File'}'
+            : fsType == 'location'
+                ? '📍 ${_clampStr(locationLabel, 80).isNotEmpty ? _clampStr(locationLabel, 80) : 'Location'}'
+                : fsType == 'audio'
+                    ? '🎤 Voice note'
+                    : cleanText;
+
+    if (conversation.isDemo || conversation.conversationKind == 'demo') {
+      final personaId = _sanitizeId(
+        conversation.demoPersonaId ?? conversation.peerUid ?? convId,
+      );
+      final rand = _rng.nextInt(90000) + 10000;
+      final msgId = _sanitizeId(
+        'dm_${DateTime.now().millisecondsSinceEpoch}_$rand',
+      );
+      final batch = db.batch();
+      batch.set(
+        db.collection('users').doc(myUid).collection('demoMessages').doc(msgId),
+        {
+          'conversationId': convId,
+          'personaId': personaId,
+          'senderId': myUid,
+          'senderName': _clampStr(senderName, 120).isNotEmpty
+              ? _clampStr(senderName, 120)
+              : 'Member',
+          'text': cleanText,
+          'messageType': fsType,
+          'mediaUrl': safeMedia,
+          'fileName': fileName != null ? _clampStr(fileName, 160) : null,
+          'fileSize': fileSize != null && fileSize >= 0 ? fileSize : null,
+          'fileMime': fileMime != null ? _clampStr(fileMime, 100) : null,
+          'locationLat': locationLat,
+          'locationLng': locationLng,
+          'locationLabel':
+              locationLabel != null ? _clampStr(locationLabel, 160) : null,
+          'locationExpiresAt': locationExpiresAt != null
+              ? _clampStr(locationExpiresAt, 64)
+              : null,
+          'durationSec': durationSec != null ? durationSec.clamp(0, 600) : null,
+          'replyToId': replyToId != null ? _sanitizeId(replyToId) : null,
+          'replyToText':
+              replyToText != null ? _clampStr(replyToText, 200) : null,
+          'forwardedFrom':
+              forwardedFrom != null ? _clampStr(forwardedFrom, 120) : null,
+          'reactions': <String, dynamic>{},
+          'isDemoAutoReply': false,
+          'createdAt': FieldValue.serverTimestamp(),
+        },
+      );
+      batch.update(
+        db
+            .collection('users')
+            .doc(myUid)
+            .collection('demoConversations')
+            .doc(convId),
+        {
+          'lastMessage': _clampStr(previewText, 500),
+          'lastMessageType': fsType,
+          'lastMessageSenderId': myUid,
+          'lastMessageAt': FieldValue.serverTimestamp(),
+          'unreadCount': 0,
+          'updatedAt': FieldValue.serverTimestamp(),
+        },
+      );
+      await batch.commit();
+
+      Timer(const Duration(milliseconds: 650), () {
+        unawaited(triggerDemoPersonaAutoReply(
+          myUid: myUid,
+          conversation: conversation,
+          userText: cleanText,
+          lang: lang,
+          markUnread: false,
+        ));
+      });
+      return;
+    }
+
+    final participants = conversation.participants.isNotEmpty
+        ? conversation.participants.map(_sanitizeId).toList()
+        : [myUid, _sanitizeId(conversation.peerUid ?? conversation.donorId)];
 
     final rand = _rng.nextInt(90000) + 10000;
     final msgId = _sanitizeId(
@@ -1468,23 +1813,11 @@ class MessengerService {
         .doc(msgId)
         .set(msgPayload);
 
-    final String? peerUid = conversation.isDemo
-        ? null
-        : (participants.cast<String?>().firstWhere(
-                  (p) => p != myUid,
-                  orElse: () => null,
-                ) ??
-            conversation.peerUid);
-
-    final previewText = fsType == 'image'
-        ? '📷 Photo'
-        : fsType == 'file'
-            ? '📎 ${_clampStr(fileName, 60).isNotEmpty ? _clampStr(fileName, 60) : 'File'}'
-            : fsType == 'location'
-                ? '📍 ${_clampStr(locationLabel, 80).isNotEmpty ? _clampStr(locationLabel, 80) : 'Location'}'
-                : fsType == 'audio'
-                    ? '🎤 Voice note'
-                    : cleanText;
+    final String? peerUid = participants.cast<String?>().firstWhere(
+              (p) => p != myUid,
+              orElse: () => null,
+            ) ??
+        conversation.peerUid;
 
     final convUpdates = <String, dynamic>{
       'lastMessage': _clampStr(previewText, 500),
@@ -1505,53 +1838,7 @@ class MessengerService {
 
     await db.collection('conversations').doc(convId).update(convUpdates);
 
-    if (conversation.isDemo && conversation.demoShopKey != null) {
-      final spec = _demoShops.cast<_DemoShopSpec?>().firstWhere(
-            (s) => s?.key == conversation.demoShopKey,
-            orElse: () => null,
-          );
-      if (spec != null) {
-        Timer(const Duration(milliseconds: 650), () async {
-          final arRand = _rng.nextInt(9000) + 1000;
-          final replyId = _sanitizeId(
-            'demo_ar_${DateTime.now().millisecondsSinceEpoch}_$arRand',
-          );
-          try {
-            await db
-                .collection('conversations')
-                .doc(convId)
-                .collection('messages')
-                .doc(replyId)
-                .set({
-              'conversationId': convId,
-              'participants': participants,
-              'senderId': spec.shopUid,
-              'senderName': spec.name,
-              'text': _clampStr(spec.autoReply, 2000),
-              'messageType': 'text',
-              'deliveredTo': [myUid],
-              'readBy': <String>[],
-              'deletedFor': <String>[],
-              'reactions': <String, dynamic>{},
-              'status': 'delivered',
-              'isDemoAutoReply': true,
-              'createdAt': FieldValue.serverTimestamp(),
-            });
-            await db.collection('conversations').doc(convId).update({
-              'lastMessage': _clampStr(spec.autoReply, 500),
-              'lastMessageType': 'text',
-              'lastMessageSenderId': spec.shopUid,
-              'lastMessageAt': FieldValue.serverTimestamp(),
-              'unreadCount.$myUid': FieldValue.increment(1),
-              'updatedAt': FieldValue.serverTimestamp(),
-            });
-          } catch (_) {}
-        });
-      }
-      return;
-    }
-
-    if (peerUid != null && peerUid != myUid) {
+    if (peerUid != null && peerUid != myUid && !peerUid.startsWith('demo_')) {
       unawaited(NotificationService.instance.createCrossUserNotification(
         recipientUid: peerUid,
         senderUid: myUid,
@@ -1575,6 +1862,23 @@ class MessengerService {
   }) async {
     final safeConvId = _sanitizeId(conversation.id);
     final safeMyUid = _sanitizeId(myUid);
+
+    if (conversation.isDemo || conversation.conversationKind == 'demo') {
+      if (markRead && conversation.unreadCount > 0) {
+        try {
+          await db
+              .collection('users')
+              .doc(safeMyUid)
+              .collection('demoConversations')
+              .doc(safeConvId)
+              .update({
+            'unreadCount': 0,
+            'updatedAt': FieldValue.serverTimestamp(),
+          });
+        } catch (_) {}
+      }
+      return;
+    }
 
     if (markRead && conversation.unreadCount > 0) {
       try {
@@ -1628,8 +1932,10 @@ class MessengerService {
 
   Future<void> markConversationUnreadAsDelivered(
     String conversationId,
-    String myUid,
-  ) async {
+    String myUid, {
+    bool isDemo = false,
+  }) async {
+    if (isDemo || conversationId.startsWith('demo_')) return;
     final safeConvId = _sanitizeId(conversationId);
     final safeMyUid = _sanitizeId(myUid);
     try {
@@ -1664,8 +1970,10 @@ class MessengerService {
   Future<void> setMessengerTyping(
     String conversationId,
     String myUid,
-    bool isTyping,
-  ) async {
+    bool isTyping, {
+    bool isDemo = false,
+  }) async {
+    if (isDemo || conversationId.startsWith('demo_')) return;
     try {
       await db
           .collection('conversations')
@@ -1680,13 +1988,25 @@ class MessengerService {
   Future<void> toggleConversationMute(
     String conversationId,
     String myUid,
-    bool muted,
-  ) async {
-    await db
-        .collection('conversations')
-        .doc(_sanitizeId(conversationId))
-        .update({
-      'mutedBy.${_sanitizeId(myUid)}': muted,
+    bool muted, {
+    bool isDemo = false,
+  }) async {
+    final safeUid = _sanitizeId(myUid);
+    final safeConv = _sanitizeId(conversationId);
+    if (isDemo || safeConv.startsWith('demo_')) {
+      await db
+          .collection('users')
+          .doc(safeUid)
+          .collection('demoConversations')
+          .doc(safeConv)
+          .update({
+        'isMuted': muted,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+      return;
+    }
+    await db.collection('conversations').doc(safeConv).update({
+      'mutedBy.$safeUid': muted,
       'updatedAt': FieldValue.serverTimestamp(),
     });
   }
@@ -1694,26 +2014,56 @@ class MessengerService {
   Future<void> toggleConversationArchive(
     String conversationId,
     String myUid,
-    bool archived,
-  ) async {
-    await db
-        .collection('conversations')
-        .doc(_sanitizeId(conversationId))
-        .update({
-      'archivedBy.${_sanitizeId(myUid)}': archived,
+    bool archived, {
+    bool isDemo = false,
+  }) async {
+    final safeUid = _sanitizeId(myUid);
+    final safeConv = _sanitizeId(conversationId);
+    if (isDemo || safeConv.startsWith('demo_')) {
+      await db
+          .collection('users')
+          .doc(safeUid)
+          .collection('demoConversations')
+          .doc(safeConv)
+          .update({
+        'isArchived': archived,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+      return;
+    }
+    await db.collection('conversations').doc(safeConv).update({
+      'archivedBy.$safeUid': archived,
       'updatedAt': FieldValue.serverTimestamp(),
     });
   }
 
   Future<void> deleteConversationForMe(
     String conversationId,
-    String myUid,
-  ) async {
+    String myUid, {
+    bool isDemo = false,
+  }) async {
     final safeMyUid = _sanitizeId(myUid);
-    await db
-        .collection('conversations')
-        .doc(_sanitizeId(conversationId))
-        .update({
+    final safeConv = _sanitizeId(conversationId);
+    if (isDemo || safeConv.startsWith('demo_')) {
+      final msgsSnap = await db
+          .collection('users')
+          .doc(safeMyUid)
+          .collection('demoMessages')
+          .where('conversationId', isEqualTo: safeConv)
+          .get();
+      final batch = db.batch();
+      for (final d in msgsSnap.docs) {
+        batch.delete(d.reference);
+      }
+      batch.delete(db
+          .collection('users')
+          .doc(safeMyUid)
+          .collection('demoConversations')
+          .doc(safeConv));
+      await batch.commit();
+      return;
+    }
+    await db.collection('conversations').doc(safeConv).update({
       'deletedFor.$safeMyUid': true,
       'unreadCount.$safeMyUid': 0,
       'updatedAt': FieldValue.serverTimestamp(),
@@ -1723,15 +2073,27 @@ class MessengerService {
   Future<void> deleteMessageForMe(
     String conversationId,
     String messageId,
-    String myUid,
-  ) async {
+    String myUid, {
+    bool isDemo = false,
+  }) async {
+    final safeUid = _sanitizeId(myUid);
+    final safeConv = _sanitizeId(conversationId);
+    if (isDemo || safeConv.startsWith('demo_')) {
+      await db
+          .collection('users')
+          .doc(safeUid)
+          .collection('demoMessages')
+          .doc(_sanitizeId(messageId))
+          .delete();
+      return;
+    }
     await db
         .collection('conversations')
-        .doc(_sanitizeId(conversationId))
+        .doc(safeConv)
         .collection('messages')
         .doc(_sanitizeId(messageId))
         .update({
-      'deletedFor': FieldValue.arrayUnion([_sanitizeId(myUid)]),
+      'deletedFor': FieldValue.arrayUnion([safeUid]),
     });
   }
 
@@ -1739,8 +2101,9 @@ class MessengerService {
     String conversationId,
     ChatMessage message,
     String myUid,
-    String emoji,
-  ) async {
+    String emoji, {
+    bool isDemo = false,
+  }) async {
     final safeConv = _sanitizeId(conversationId);
     final safeMyUid = _sanitizeId(myUid);
     final currentForEmoji = message.reactions
@@ -1751,14 +2114,22 @@ class MessengerService {
         ? currentForEmoji.where((u) => u != safeMyUid).toList()
         : [...currentForEmoji, safeMyUid];
 
+    if (isDemo || safeConv.startsWith('demo_')) {
+      await db
+          .collection('users')
+          .doc(safeMyUid)
+          .collection('demoMessages')
+          .doc(message.id)
+          .update({'reactions.$emoji': nextForEmoji});
+      return;
+    }
+
     await db
         .collection('conversations')
         .doc(safeConv)
         .collection('messages')
         .doc(message.id)
-        .update({
-      'reactions.$emoji': nextForEmoji,
-    });
+        .update({'reactions.$emoji': nextForEmoji});
   }
 
   Future<void> forwardMessengerMessage({
@@ -1767,6 +2138,7 @@ class MessengerService {
     required String senderId,
     required String senderName,
     required String forwardedFromLabel,
+    String lang = 'en',
   }) async {
     final mediaUrl = sourceMessage.imageUrl ??
         sourceMessage.fileUrl ??
@@ -1788,6 +2160,7 @@ class MessengerService {
         locationLng: sourceMessage.locationLng,
         locationLabel: sourceMessage.locationLabel,
         forwardedFrom: forwardedFromLabel,
+        lang: lang,
       );
     }
   }

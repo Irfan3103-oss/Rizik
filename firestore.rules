@@ -105,7 +105,7 @@ service cloud.firestore {
         && (!('handle' in data) || (data.handle is string && data.handle.size() >= 3 && data.handle.size() <= 40))
         && (!('photoURL' in data) || data.photoURL == null || (data.photoURL is string && data.photoURL.size() <= 250000))
         && (!('email' in data) || (data.email is string && data.email.size() <= 160))
-        && data.role in ['user', 'restaurantOwner', 'recipient', 'donor']
+        && data.role in ['user', 'restaurantOwner', 'recipient', 'donor', 'admin']
         && data.area is string && data.area.size() >= 1 && data.area.size() <= 80
         && (!('organizationName' in data) || (data.organizationName is string && data.organizationName.size() <= 120))
         && (!('businessName' in data) || (data.businessName is string && data.businessName.size() <= 120))
@@ -747,6 +747,7 @@ service cloud.firestore {
         && isValidId(userId)
         && isValidUserPublic(incoming())
         && incoming().uid == request.auth.uid
+        && (incoming().role != 'admin' || isAdmin())
         && incoming().verified == false
         && incoming().createdAt == request.time
         && incoming().updatedAt == request.time
@@ -993,15 +994,15 @@ service cloud.firestore {
               && 'isDemo' in incoming()
               && incoming().isDemo == true
               && incoming().senderIsDemo == true
-              && incoming().createdAt <= request.time
-              && incoming().createdAt >= request.time - duration.value(10, 'd')
+              && incoming().createdAt <= request.time + duration.value(1, 'd')
+              && incoming().createdAt >= request.time - duration.value(30, 'd')
             ) || (
               incoming().createdAt == request.time
               && incoming().senderId == request.auth.uid
               && incoming().senderIsDemo == false
               && (!('isDemo' in incoming()) || incoming().isDemo == false)
               && (!('deleted' in incoming()) || incoming().deleted == false)
-              && roomRateLimitOk(roomId, request.auth.uid)
+              && (isAdmin() || roomRateLimitOk(roomId, request.auth.uid))
             )
           );
         allow update: if isValidId(roomId)

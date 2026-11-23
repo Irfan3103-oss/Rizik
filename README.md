@@ -1450,3 +1450,25 @@ Defined in `firestore.indexes.json`. Create these in **Firebase Console → Fire
    - Messages, online/last-seen presence, typing indicators, and delivered/read receipts sync in real time over Firestore (`conversations/direct_{sortedUidA}_{sortedUidB}`) and Community Rooms (`rooms/{roomId}/messages`).
 5. **Before Public Launch**: Delete any temporary test users created for QA in **Firebase Console → Authentication → Users** (along with their test `users/{uid}` and `userDirectory/{uid}` documents) so only real accounts and intentionally seeded demo personas remain.
 
+---
+
+## 6. Publishing Security Rules & Composite Indexes (`firestore.rules`, `firestore.indexes.json`, `storage.rules`, `database.rules.json`)
+
+### Option A: Publish via Firebase CLI (Recommended)
+
+```bash
+# Deploy Firestore rules & composite indexes together
+firebase deploy --only firestore:rules,firestore:indexes --project ahar-for-all-58560
+
+# Deploy Cloud Storage and Realtime Database presence rules
+firebase deploy --only storage,database --project ahar-for-all-58560
+```
+
+*(Note: If you use a named Firestore database (`ai-studio-nourishloop-73bca805-3fbc-4853-bf13-b6677e5fc115`), configure it in `firebase.json` under `"firestore": { "database": "ai-studio-nourishloop-73bca805-3fbc-4853-bf13-b6677e5fc115", "rules": "firestore.rules", "indexes": "firestore.indexes.json" }` before running `firebase deploy`.)*
+
+### Option B: Paste Directly in Firebase Console
+
+1. **Firestore Rules**: Open **Firebase Console → Firestore Database → Rules**, select your database (`ai-studio-nourishloop-73bca805-3fbc-4853-bf13-b6677e5fc115`), paste the full contents of `firestore.rules`, and click **Publish**.
+2. **Firestore Indexes**: Open **Firebase Console → Firestore Database → Indexes → Composite**, create the indexes defined in `firestore.indexes.json` (or click the direct index creation link surfaced inside **Admin → Chat & Data Health Check**).
+3. **Storage Rules**: Open **Firebase Console → Storage → Rules**, paste `storage.rules`, and click **Publish**.
+4. **Realtime Database Rules**: Open **Firebase Console → Realtime Database → Rules**, paste `database.rules.json`, and click **Publish**.

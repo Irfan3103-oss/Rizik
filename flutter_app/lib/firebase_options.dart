@@ -28,6 +28,7 @@ class DefaultFirebaseOptions {
     messagingSenderId: '318012951605',
     projectId: 'ahar-for-all-58560',
     authDomain: 'ahar-for-all-58560.firebaseapp.com',
+    databaseURL: 'https://ahar-for-all-58560-default-rtdb.firebaseio.com',
     storageBucket: 'ahar-for-all-58560.firebasestorage.app',
   );
 
@@ -36,6 +37,7 @@ class DefaultFirebaseOptions {
     appId: '1:318012951605:web:d50cbb3dc67ed20178b57c',
     messagingSenderId: '318012951605',
     projectId: 'ahar-for-all-58560',
+    databaseURL: 'https://ahar-for-all-58560-default-rtdb.firebaseio.com',
     storageBucket: 'ahar-for-all-58560.firebasestorage.app',
   );
 
@@ -45,6 +47,7 @@ class DefaultFirebaseOptions {
     messagingSenderId: '318012951605',
     projectId: 'ahar-for-all-58560',
     authDomain: 'ahar-for-all-58560.firebaseapp.com',
+    databaseURL: 'https://ahar-for-all-58560-default-rtdb.firebaseio.com',
     storageBucket: 'ahar-for-all-58560.firebasestorage.app',
     iosBundleId: 'org.aharforall.app',
   );

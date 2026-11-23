@@ -1,17 +1,21 @@
 import { useMemo, useState } from 'react';
 import {
+  AlertTriangle,
   BadgeCheck,
   Ban,
   Check,
   Clock,
+  HeartPulse,
   Loader2,
   MapPin,
   MessageCircle,
   Search,
+  Sparkles,
   Star,
   Users,
   X,
 } from 'lucide-react';
+import type { FirestoreListenerError } from '../firebase';
 import type { UserDirectoryEntry } from '../types';
 import { DemoBadge } from './DemoBadge';
 import { ShopAvatar } from './ShopAvatar';
@@ -28,6 +32,8 @@ interface FindPeopleModalProps {
   loadingMore?: boolean;
   onLoadMore?: () => void;
   blockedUids?: Set<string>;
+  directoryError?: FirestoreListenerError | null;
+  onRunHealthCheck?: () => void;
   onSelectPerson: (entry: UserDirectoryEntry) => Promise<void> | void;
 }
 
@@ -39,6 +45,8 @@ export function FindPeopleModal({
   loadingMore = false,
   onLoadMore,
   blockedUids,
+  directoryError,
+  onRunHealthCheck,
   onSelectPerson,
 }: FindPeopleModalProps) {
   const { lang, t, formatNumber, formatArea } = useI18n();
@@ -97,6 +105,19 @@ export function FindPeopleModal({
     });
   }, [visibleByDemoToggle, tab, search]);
 
+  const { demoEntries, communityEntries } = useMemo(() => {
+    const demo: UserDirectoryEntry[] = [];
+    const real: UserDirectoryEntry[] = [];
+    for (const entry of filtered) {
+      if (entry.isDemo || entry.uid.startsWith('demo_')) {
+        demo.push(entry);
+      } else {
+        real.push(entry);
+      }
+    }
+    return { demoEntries: demo, communityEntries: real };
+  }, [filtered]);
+
   if (!open) return null;
 
   const formatLastSeen = (entry: UserDirectoryEntry) => {
@@ -117,6 +138,120 @@ export function FindPeopleModal({
     { id: 'people', label: t('findPeople.tabs.people'), count: counts.people },
     { id: 'online', label: t('findPeople.tabs.online'), count: counts.online },
   ];
+
+  const renderPersonRow = (entry: UserDirectoryEntry) => {
+    const isBlocked = blockedUids?.has(entry.uid) ?? false;
+    const isDemo = Boolean(entry.isDemo) || entry.uid.startsWith('demo_');
+    const isRestaurant = entry.role === 'restaurantOwner' || entry.role === 'donor';
+    const title = isRestaurant && entry.restaurantName ? entry.restaurantName : entry.displayName;
+    const busy = openingUid === entry.uid;
+    const roleMeta = getRoleMeta(entry.role, t);
+    const bioLine = lang === 'bn' && entry.bioBn ? entry.bioBn : entry.bio;
+
+    return (
+      <button
+        key={entry.uid}
+        type="button"
+        disabled={Boolean(openingUid) || isBlocked}
+        onClick={async () => {
+          setOpeningUid(entry.uid);
+          try {
+            await onSelectPerson(entry);
+            onClose();
+          } finally {
+            setOpeningUid(null);
+          }
+        }}
+        className="w-full px-4 py-3 flex items-center gap-3 text-left hover:bg-[var(--bg-subtle)] disabled:opacity-65 transition-colors cursor-pointer"
+      >
+        <ShopAvatar
+          name={title}
+          imageUrl={entry.photoURL ?? null}
+          online={entry.online}
+          showStatusDot
+          size="md"
+        />
+        <div className="min-w-0 flex-1 space-y-0.5">
+          <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
+            <p className="text-sm font-bold text-[var(--text-primary)] truncate">{title}</p>
+            {entry.verified && (
+              <BadgeCheck
+                className="w-3.5 h-3.5 text-[var(--brand-text)] shrink-0"
+                aria-label={t('common.verifiedDonor')}
+              />
+            )}
+            {isDemo && <DemoBadge compact />}
+            <span
+              className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-bold shrink-0 ${roleMeta.className}`}
+            >
+              <RoleIcon role={entry.role} />
+              {roleMeta.label}
+            </span>
+            {isBlocked && (
+              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md bg-red-100 dark:bg-red-950/60 text-red-700 dark:text-red-300 text-[10px] font-bold shrink-0">
+                <Ban className="w-2.5 h-2.5" />
+                {t('chat.blockUser')}
+              </span>
+            )}
+          </div>
+
+          <div className="flex items-center gap-1.5 text-[11px] text-[var(--text-secondary)] truncate">
+            <span className="font-mono text-[var(--brand-text)] truncate">{entry.handle}</span>
+            <span aria-hidden="true">·</span>
+            <span className="inline-flex items-center gap-0.5 truncate text-[var(--text-muted)]">
+              <MapPin className="w-3 h-3 shrink-0" />
+              {formatArea(entry.area)}
+            </span>
+            {typeof entry.rating === 'number' && entry.rating > 0 && (
+              <>
+                <span aria-hidden="true">·</span>
+                <span className="inline-flex items-center gap-0.5 text-amber-600 dark:text-amber-400 font-semibold tabular-nums shrink-0">
+                  <Star className="w-3 h-3 fill-amber-500 text-amber-500" />
+                  {formatNumber(entry.rating.toFixed(1))}
+                </span>
+              </>
+            )}
+          </div>
+
+          {bioLine && (
+            <p className="text-[11px] text-[var(--text-muted)] line-clamp-1">{bioLine}</p>
+          )}
+
+          <div className="flex items-center gap-2 text-[10px]">
+            <span
+              className={`font-semibold ${
+                entry.online
+                  ? 'text-emerald-600 dark:text-emerald-400'
+                  : 'text-[var(--text-muted)]'
+              }`}
+            >
+              {formatLastSeen(entry)}
+            </span>
+            {entry.openingHours && (
+              <span className="inline-flex items-center gap-0.5 text-[var(--text-muted)] truncate">
+                <Clock className="w-2.5 h-2.5 shrink-0" />
+                {entry.openingHours}
+              </span>
+            )}
+          </div>
+        </div>
+
+        <span className="min-h-[34px] px-2.5 py-1 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-canvas)] text-[11px] font-semibold text-[var(--brand-text)] inline-flex items-center gap-1 whitespace-nowrap shrink-0">
+          {busy ? (
+            <>
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              <span>{t('findPeople.opening')}</span>
+            </>
+          ) : (
+            <>
+              <MessageCircle className="w-3.5 h-3.5" />
+              <span>{t('findPeople.startChat')}</span>
+            </>
+          )}
+        </span>
+      </button>
+    );
+  };
 
   return (
     <div
@@ -155,7 +290,7 @@ export function FindPeopleModal({
           </button>
         </div>
 
-        {/* Search, Tabs & Include Demo Filter Chip */}
+        {/* Search, Tabs & Always-visible Include Demo Filter Chip */}
         <div className="p-3 sm:px-4 border-b border-[var(--border-subtle)] space-y-2.5 shrink-0">
           <div className="relative">
             <Search className="w-3.5 h-3.5 text-[var(--text-muted)] absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
@@ -198,169 +333,116 @@ export function FindPeopleModal({
             })}
           </div>
 
-          {demoCount > 0 && (
-            <div className="flex items-center justify-between gap-2">
-              <button
-                type="button"
-                aria-pressed={includeDemo}
-                onClick={() => setIncludeDemo((v) => !v)}
-                className={`min-h-[30px] px-2.5 py-1 rounded-xl text-[11px] font-semibold inline-flex items-center gap-1.5 border transition-colors cursor-pointer ${
+          <div className="flex items-center justify-between gap-2">
+            <button
+              type="button"
+              aria-pressed={includeDemo}
+              onClick={() => setIncludeDemo((v) => !v)}
+              className={`min-h-[30px] px-2.5 py-1 rounded-xl text-[11px] font-semibold inline-flex items-center gap-1.5 border transition-colors cursor-pointer ${
+                includeDemo
+                  ? 'border-amber-400/60 bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-200'
+                  : 'border-[var(--border-subtle)] bg-[var(--bg-subtle)] text-[var(--text-muted)]'
+              }`}
+            >
+              <span
+                className={`w-3.5 h-3.5 rounded flex items-center justify-center border ${
                   includeDemo
-                    ? 'border-amber-400/60 bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-200'
-                    : 'border-[var(--border-subtle)] bg-[var(--bg-subtle)] text-[var(--text-muted)]'
+                    ? 'bg-amber-600 border-amber-600 text-white'
+                    : 'border-[var(--border-strong)] bg-transparent'
                 }`}
               >
-                <span
-                  className={`w-3.5 h-3.5 rounded flex items-center justify-center border ${
-                    includeDemo
-                      ? 'bg-amber-600 border-amber-600 text-white'
-                      : 'border-[var(--border-strong)] bg-transparent'
-                  }`}
-                >
-                  {includeDemo && <Check className="w-2.5 h-2.5" />}
-                </span>
-                <span>{t('demo.includeDemoChip')}</span>
-                <span className="opacity-75 tabular-nums">({formatNumber(demoCount)})</span>
+                {includeDemo && <Check className="w-2.5 h-2.5" />}
+              </span>
+              <span>{t('demo.includeDemoChip')}</span>
+              <span className="opacity-75 tabular-nums">({formatNumber(demoCount)})</span>
+            </button>
+
+            {onRunHealthCheck && (
+              <button
+                type="button"
+                onClick={onRunHealthCheck}
+                className="min-h-[28px] px-2 py-0.5 rounded-lg text-[11px] font-semibold text-[var(--brand-text)] hover:bg-[var(--brand-soft)] inline-flex items-center gap-1 cursor-pointer"
+              >
+                <HeartPulse className="w-3 h-3" />
+                <span>{t('healthCheck.runBtn')}</span>
               </button>
-            </div>
-          )}
+            )}
+          </div>
         </div>
 
-        {/* People List */}
-        <div className="flex-1 min-h-0 overflow-y-auto divide-y divide-[var(--border-subtle)]">
-          {filtered.length === 0 ? (
+        {/* Visible Firestore Error Banner */}
+        {directoryError && (
+          <div className="mx-3 mt-3 p-3 rounded-xl border border-rose-300 bg-rose-50 dark:bg-rose-950/50 dark:border-rose-800 text-rose-900 dark:text-rose-200 space-y-2 shrink-0">
+            <div className="flex items-start gap-2 text-xs font-semibold">
+              <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-rose-600" />
+              <span>
+                {t('chatErrors.couldNotLoadPeople', { code: directoryError.code })}
+              </span>
+            </div>
+            {onRunHealthCheck && (
+              <button
+                type="button"
+                onClick={onRunHealthCheck}
+                className="min-h-[30px] px-2.5 py-1 rounded-lg bg-white dark:bg-rose-900 text-rose-800 dark:text-rose-100 text-[11px] font-bold inline-flex items-center gap-1 border border-rose-200 cursor-pointer"
+              >
+                <HeartPulse className="w-3.5 h-3.5" />
+                {t('healthCheck.runBtn')}
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* People List Grouped by Demo Accounts + Community Members */}
+        <div className="flex-1 min-h-0 overflow-y-auto">
+          {filtered.length === 0 && !directoryError ? (
             <div className="p-8 text-center space-y-2">
               <Users className="w-8 h-8 text-[var(--text-muted)] opacity-45 mx-auto" />
               <p className="text-xs font-medium text-[var(--text-muted)]">
-                {t('findPeople.empty')}
+                {demoCount === 0 && includeDemo
+                  ? t('findPeople.emptyNotSeededHint')
+                  : t('findPeople.empty')}
               </p>
             </div>
           ) : (
-            filtered.map((entry) => {
-              const isBlocked = blockedUids?.has(entry.uid) ?? false;
-              const isDemo = Boolean(entry.isDemo) || entry.uid.startsWith('demo_');
-              const isRestaurant =
-                entry.role === 'restaurantOwner' || entry.role === 'donor';
-              const title =
-                isRestaurant && entry.restaurantName ? entry.restaurantName : entry.displayName;
-              const busy = openingUid === entry.uid;
-              const roleMeta = getRoleMeta(entry.role, t);
-              const bioLine = lang === 'bn' && entry.bioBn ? entry.bioBn : entry.bio;
-
-              return (
-                <button
-                  key={entry.uid}
-                  type="button"
-                  disabled={Boolean(openingUid) || isBlocked}
-                  onClick={async () => {
-                    setOpeningUid(entry.uid);
-                    try {
-                      await onSelectPerson(entry);
-                      onClose();
-                    } finally {
-                      setOpeningUid(null);
-                    }
-                  }}
-                  className="w-full px-4 py-3 flex items-center gap-3 text-left hover:bg-[var(--bg-subtle)] disabled:opacity-65 transition-colors cursor-pointer"
-                >
-                  <ShopAvatar
-                    name={title}
-                    imageUrl={entry.photoURL ?? null}
-                    online={entry.online}
-                    showStatusDot
-                    size="md"
-                  />
-                  <div className="min-w-0 flex-1 space-y-0.5">
-                    <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
-                      <p className="text-sm font-bold text-[var(--text-primary)] truncate">
-                        {title}
-                      </p>
-                      {entry.verified && (
-                        <BadgeCheck
-                          className="w-3.5 h-3.5 text-[var(--brand-text)] shrink-0"
-                          aria-label={t('common.verifiedDonor')}
-                        />
-                      )}
-                      {isDemo && <DemoBadge compact />}
-                      <span
-                        className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-bold shrink-0 ${roleMeta.className}`}
-                      >
-                        <RoleIcon role={entry.role} />
-                        {roleMeta.label}
-                      </span>
-                      {isBlocked && (
-                        <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md bg-red-100 dark:bg-red-950/60 text-red-700 dark:text-red-300 text-[10px] font-bold shrink-0">
-                          <Ban className="w-2.5 h-2.5" />
-                          {t('chat.blockUser')}
-                        </span>
-                      )}
-                    </div>
-
-                    <div className="flex items-center gap-1.5 text-[11px] text-[var(--text-secondary)] truncate">
-                      <span className="font-mono text-[var(--brand-text)] truncate">
-                        {entry.handle}
-                      </span>
-                      <span aria-hidden="true">·</span>
-                      <span className="inline-flex items-center gap-0.5 truncate text-[var(--text-muted)]">
-                        <MapPin className="w-3 h-3 shrink-0" />
-                        {formatArea(entry.area)}
-                      </span>
-                      {typeof entry.rating === 'number' && entry.rating > 0 && (
-                        <>
-                          <span aria-hidden="true">·</span>
-                          <span className="inline-flex items-center gap-0.5 text-amber-600 dark:text-amber-400 font-semibold tabular-nums shrink-0">
-                            <Star className="w-3 h-3 fill-amber-500 text-amber-500" />
-                            {formatNumber(entry.rating.toFixed(1))}
-                          </span>
-                        </>
-                      )}
-                    </div>
-
-                    {bioLine && (
-                      <p className="text-[11px] text-[var(--text-muted)] line-clamp-1">
-                        {bioLine}
-                      </p>
-                    )}
-
-                    <div className="flex items-center gap-2 text-[10px]">
-                      <span
-                        className={`font-semibold ${
-                          entry.online
-                            ? 'text-emerald-600 dark:text-emerald-400'
-                            : 'text-[var(--text-muted)]'
-                        }`}
-                      >
-                        {formatLastSeen(entry)}
-                      </span>
-                      {entry.openingHours && (
-                        <span className="inline-flex items-center gap-0.5 text-[var(--text-muted)] truncate">
-                          <Clock className="w-2.5 h-2.5 shrink-0" />
-                          {entry.openingHours}
-                        </span>
-                      )}
-                    </div>
+            <>
+              {includeDemo && demoEntries.length > 0 && (
+                <div>
+                  <div className="px-4 py-2 bg-amber-50/70 dark:bg-amber-950/25 border-b border-[var(--border-subtle)] flex items-center justify-between">
+                    <span className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-amber-800 dark:text-amber-200">
+                      <Sparkles className="w-3.5 h-3.5" />
+                      {t('findPeople.demoSectionTitle')}
+                    </span>
+                    <span className="text-[11px] font-semibold text-amber-700 dark:text-amber-300 tabular-nums">
+                      {formatNumber(demoEntries.length)}
+                    </span>
                   </div>
+                  <div className="divide-y divide-[var(--border-subtle)]">
+                    {demoEntries.map(renderPersonRow)}
+                  </div>
+                </div>
+              )}
 
-                  <span className="min-h-[34px] px-2.5 py-1 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-canvas)] text-[11px] font-semibold text-[var(--brand-text)] inline-flex items-center gap-1 whitespace-nowrap shrink-0">
-                    {busy ? (
-                      <>
-                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                        <span>{t('findPeople.opening')}</span>
-                      </>
-                    ) : (
-                      <>
-                        <MessageCircle className="w-3.5 h-3.5" />
-                        <span>{t('findPeople.startChat')}</span>
-                      </>
-                    )}
-                  </span>
-                </button>
-              );
-            })
+              {communityEntries.length > 0 && (
+                <div>
+                  <div className="px-4 py-2 bg-[var(--bg-subtle)]/80 border-y border-[var(--border-subtle)] flex items-center justify-between">
+                    <span className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-[var(--text-secondary)]">
+                      <Users className="w-3.5 h-3.5" />
+                      {t('findPeople.communitySectionTitle')}
+                    </span>
+                    <span className="text-[11px] font-semibold text-[var(--text-muted)] tabular-nums">
+                      {formatNumber(communityEntries.length)}
+                    </span>
+                  </div>
+                  <div className="divide-y divide-[var(--border-subtle)]">
+                    {communityEntries.map(renderPersonRow)}
+                  </div>
+                </div>
+              )}
+            </>
           )}
 
           {hasMore && onLoadMore && (
-            <div className="p-3 text-center">
+            <div className="p-3 text-center border-t border-[var(--border-subtle)]">
               <button
                 type="button"
                 disabled={loadingMore}

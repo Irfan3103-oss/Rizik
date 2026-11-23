@@ -15,7 +15,13 @@ import {
   writeBatch,
   type Unsubscribe,
 } from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType } from '../firebase';
+import {
+  db,
+  type FirestoreListenerError,
+  handleFirestoreError,
+  OperationType,
+  parseFirestoreListenerError,
+} from '../firebase';
 import { createCrossUserNotification } from './notificationService';
 import type {
   AdminChatMessage,
@@ -270,7 +276,8 @@ export async function ensureAdminConversationForOwner(params: {
 }
 
 export function subscribeAdminNotifications(
-  onNotifications: (items: AdminNotificationItem[]) => void
+  onNotifications: (items: AdminNotificationItem[]) => void,
+  onError?: (err: FirestoreListenerError) => void
 ): Unsubscribe {
   const q = query(collection(db, 'adminNotifications'), orderBy('createdAt', 'desc'));
   return onSnapshot(
@@ -297,7 +304,7 @@ export function subscribeAdminNotifications(
       onNotifications(items);
     },
     (err) => {
-      handleFirestoreError(err, OperationType.LIST, 'adminNotifications');
+      onError?.(parseFirestoreListenerError(err, OperationType.LIST, 'adminNotifications'));
     }
   );
 }
@@ -333,7 +340,8 @@ export async function markAllAdminNotificationsRead(
 }
 
 export function subscribeAllFirebaseUsers(
-  onUsers: (users: PlatformUserSummary[]) => void
+  onUsers: (users: PlatformUserSummary[]) => void,
+  onError?: (err: FirestoreListenerError) => void
 ): Unsubscribe {
   return onSnapshot(
     collection(db, 'users'),
@@ -367,13 +375,14 @@ export function subscribeAllFirebaseUsers(
       onUsers(list);
     },
     (err) => {
-      handleFirestoreError(err, OperationType.LIST, 'users');
+      onError?.(parseFirestoreListenerError(err, OperationType.LIST, 'users'));
     }
   );
 }
 
 export function subscribeRestaurantApplications(
-  onApps: (apps: RestaurantOwnerApplication[]) => void
+  onApps: (apps: RestaurantOwnerApplication[]) => void,
+  onError?: (err: FirestoreListenerError) => void
 ): Unsubscribe {
   const q = query(collection(db, 'users'), where('role', '==', 'restaurantOwner'));
   return onSnapshot(
@@ -399,7 +408,7 @@ export function subscribeRestaurantApplications(
       onApps(list);
     },
     (err) => {
-      handleFirestoreError(err, OperationType.LIST, 'users');
+      onError?.(parseFirestoreListenerError(err, OperationType.LIST, 'users'));
     }
   );
 }
@@ -525,7 +534,8 @@ export async function reviewRestaurantApplication(params: {
 }
 
 export function subscribeAllAdminConversations(
-  onConversations: (items: AdminConversation[]) => void
+  onConversations: (items: AdminConversation[]) => void,
+  onError?: (err: FirestoreListenerError) => void
 ): Unsubscribe {
   const q = query(collection(db, 'adminConversations'), orderBy('lastMessageAt', 'desc'));
   return onSnapshot(
@@ -536,14 +546,15 @@ export function subscribeAllAdminConversations(
       );
     },
     (err) => {
-      handleFirestoreError(err, OperationType.LIST, 'adminConversations');
+      onError?.(parseFirestoreListenerError(err, OperationType.LIST, 'adminConversations'));
     }
   );
 }
 
 export function subscribeMyAdminConversation(
   ownerUid: string,
-  onConversation: (conv: AdminConversation | null) => void
+  onConversation: (conv: AdminConversation | null) => void,
+  onError?: (err: FirestoreListenerError) => void
 ): Unsubscribe {
   const convId = getAdminConvId(ownerUid);
   return onSnapshot(
@@ -556,7 +567,7 @@ export function subscribeMyAdminConversation(
       }
     },
     (err) => {
-      handleFirestoreError(err, OperationType.GET, `adminConversations/${convId}`);
+      onError?.(parseFirestoreListenerError(err, OperationType.GET, `adminConversations/${convId}`));
     }
   );
 }
@@ -564,7 +575,8 @@ export function subscribeMyAdminConversation(
 export function subscribeAdminChatMessages(
   conversationId: string,
   ownerUid: string,
-  onMessages: (msgs: AdminChatMessage[]) => void
+  onMessages: (msgs: AdminChatMessage[]) => void,
+  onError?: (err: FirestoreListenerError) => void
 ): Unsubscribe {
   const q = query(
     collection(db, 'adminConversations', conversationId, 'messages'),
@@ -608,10 +620,12 @@ export function subscribeAdminChatMessages(
       onMessages(msgs);
     },
     (err) => {
-      handleFirestoreError(
-        err,
-        OperationType.LIST,
-        `adminConversations/${conversationId}/messages`
+      onError?.(
+        parseFirestoreListenerError(
+          err,
+          OperationType.LIST,
+          `adminConversations/${conversationId}/messages`
+        )
       );
     }
   );

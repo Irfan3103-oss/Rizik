@@ -4,6 +4,7 @@ import {
   deleteDoc,
   doc,
   getDoc,
+  getDocFromCache,
   getDocs,
   limit,
   onSnapshot,
@@ -13,9 +14,20 @@ import {
   Timestamp,
   updateDoc,
   where,
+  type DocumentData,
+  type DocumentReference,
+  type DocumentSnapshot,
   type Unsubscribe,
 } from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType } from '../firebase';
+import {
+  db,
+  type FirestoreListenerError,
+  handleFirestoreError,
+  isFirestoreOfflineError,
+  OperationType,
+  parseFirestoreListenerError,
+  reconnectFirestore,
+} from '../firebase';
 import { FOOD_CATEGORY_IMAGES } from '../data/images';
 import type {
   AccountType,
@@ -61,11 +73,51 @@ function sanitizeId(raw: string): string {
   return cleaned || `id_${Date.now()}`;
 }
 
+const AUTHORITATIVE_ADMIN_EMAIL = 'jafor05101007@student.ndub.edu.bd';
+const BLOCKED_ADMIN_EMAIL = 'sheikhsahel513@gmail.com';
+
+async function getDocResilient<T = DocumentData>(
+  ref: DocumentReference<T>,
+  path: string
+): Promise<DocumentSnapshot<T> | null> {
+  try {
+    return await getDoc(ref);
+  } catch (firstErr) {
+    if (!isFirestoreOfflineError(firstErr)) {
+      handleFirestoreError(firstErr, OperationType.GET, path);
+    }
+    console.warn(`Firestore offline on get(${path}); attempting network reconnect...`, firstErr);
+    await reconnectFirestore();
+    await new Promise((r) => setTimeout(r, 300));
+    try {
+      return await getDoc(ref);
+    } catch (retryErr) {
+      if (!isFirestoreOfflineError(retryErr)) {
+        handleFirestoreError(retryErr, OperationType.GET, path);
+      }
+      try {
+        const cached = await getDocFromCache(ref);
+        if (cached.exists()) {
+          return cached;
+        }
+      } catch {
+        // Not in local cache yet
+      }
+      return null;
+    }
+  }
+}
+
 export async function checkIsFirebaseAdmin(
   fbUser: FirebaseUser | null,
   forceRefresh = false
 ): Promise<boolean> {
   if (!fbUser) return false;
+  const normalizedEmail = (fbUser.email ?? '').trim().toLowerCase();
+  if (normalizedEmail === BLOCKED_ADMIN_EMAIL) {
+    return false;
+  }
+
   try {
     let tokenResult = await fbUser.getIdTokenResult(forceRefresh);
     if (fbUser.emailVerified && tokenResult.claims?.email_verified !== true) {
@@ -82,20 +134,26 @@ export async function checkIsFirebaseAdmin(
     return false;
   }
 
+  let sawOfflineError = false;
   try {
     const adminDoc = await getDoc(doc(db, 'admins', fbUser.uid));
     if (adminDoc.exists() && adminDoc.data()?.enabled === false) {
       return false;
     }
-  } catch {
-    // Continue to server rules probe
+  } catch (err) {
+    if (isFirestoreOfflineError(err)) {
+      sawOfflineError = true;
+    }
   }
 
   // Server-authoritative Firestore Rules probe: readable ONLY when isAdmin() in firestore.rules evaluates true
   try {
     await getDoc(doc(db, 'admins', 'adminverify'));
     return true;
-  } catch {
+  } catch (err) {
+    if (isFirestoreOfflineError(err) || sawOfflineError) {
+      return normalizedEmail === AUTHORITATIVE_ADMIN_EMAIL;
+    }
     return false;
   }
 }
@@ -304,19 +362,41 @@ async function doSyncFirebaseUserProfile(
   const userDocRef = doc(db, 'users', uid);
   const privateDocRef = doc(db, 'users', uid, 'private', 'info');
 
-  let pubSnap;
-  try {
-    pubSnap = await getDoc(userDocRef);
-  } catch (error) {
-    handleFirestoreError(error, OperationType.GET, `users/${uid}`);
+  const pubSnap = await getDocResilient(userDocRef, `users/${uid}`);
+  if (!pubSnap) {
+    const fallbackAdmin =
+      typeof isAdminOverride === 'boolean' ? isAdminOverride : await checkIsFirebaseAdmin(fbUser);
+    return buildAppUserFromFirestore(
+      fbUser,
+      {
+        uid,
+        name: initialProfile?.displayName || fbUser.displayName || undefined,
+        displayName: initialProfile?.displayName || fbUser.displayName || undefined,
+        email: fbUser.email || '',
+        role:
+          initialProfile?.role ||
+          (initialProfile?.accountType === 'restaurantOwner' ? 'restaurantOwner' : 'user'),
+        area: initialProfile?.restaurant?.area || initialProfile?.area || 'Dhanmondi',
+        organizationName: initialProfile?.organizationName,
+        businessName: initialProfile?.restaurant?.restaurantName || initialProfile?.businessName,
+        hours: initialProfile?.restaurant?.openingHours || initialProfile?.hours,
+        verified: fbUser.emailVerified,
+        discoverable: true,
+        language: preferredLang === 'bn' ? 'bn' : 'en',
+        savedRadiusKm: 10,
+        restaurant: initialProfile?.restaurant,
+      },
+      {
+        uid,
+        email: fbUser.email || '',
+        phone: initialProfile?.restaurant?.phone || initialProfile?.phone,
+        address: initialProfile?.restaurant?.address || initialProfile?.address,
+      },
+      fallbackAdmin
+    );
   }
 
-  let privSnap;
-  try {
-    privSnap = await getDoc(privateDocRef);
-  } catch (error) {
-    handleFirestoreError(error, OperationType.GET, `users/${uid}/private/info`);
-  }
+  const privSnap = await getDocResilient(privateDocRef, `users/${uid}/private/info`);
 
   const displayName =
     clampStr(initialProfile?.displayName, 100) ||
@@ -393,18 +473,25 @@ async function doSyncFirebaseUserProfile(
     try {
       await setDoc(userDocRef, createPublicPayload);
     } catch (error) {
-      handleFirestoreError(error, OperationType.CREATE, `users/${uid}`);
+      if (!isFirestoreOfflineError(error)) {
+        handleFirestoreError(error, OperationType.CREATE, `users/${uid}`);
+      }
+      console.warn(`Firestore offline on create(users/${uid}); using provisional profile.`, error);
     }
   } else {
     const existingData = pubSnap.data() as Record<string, unknown> | undefined;
+    const resolvedName =
+      clampStr(existingData?.displayName as string | undefined, 100) ||
+      clampStr(existingData?.name as string | undefined, 100) ||
+      displayName;
     const backfill: Record<string, unknown> = {
-      displayName:
-        clampStr(existingData?.displayName as string | undefined, 100) || displayName,
+      name: clampStr(existingData?.name as string | undefined, 100) || resolvedName,
+      displayName: resolvedName,
       updatedAt: serverTimestamp(),
     };
     if (!existingData?.handle) {
       const slug =
-        displayName
+        resolvedName
           .toLowerCase()
           .replace(/[^a-z0-9]+/g, '_')
           .replace(/^_+|_+$/g, '')
@@ -414,14 +501,29 @@ async function doSyncFirebaseUserProfile(
     if (typeof existingData?.discoverable !== 'boolean') {
       backfill.discoverable = true;
     }
+    if (!existingData?.area) {
+      backfill.area = clampStr(initialProfile?.area, 80) || 'Dhanmondi';
+    }
+    if (existingData?.language !== 'en' && existingData?.language !== 'bn') {
+      backfill.language = preferredLang === 'bn' ? 'bn' : 'en';
+    }
+    if (typeof existingData?.savedRadiusKm !== 'number') {
+      backfill.savedRadiusKm = 10;
+    }
+    if (typeof existingData?.verified !== 'boolean') {
+      backfill.verified = false;
+    }
     try {
       await updateDoc(userDocRef, backfill);
     } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `users/${uid}`);
+      if (!isFirestoreOfflineError(error)) {
+        handleFirestoreError(error, OperationType.UPDATE, `users/${uid}`);
+      }
+      console.warn(`Firestore offline on update(users/${uid}); continuing with cached data.`, error);
     }
   }
 
-  if (!privSnap.exists()) {
+  if (privSnap && !privSnap.exists()) {
     const createPrivPayload: Record<string, unknown> = {
       uid,
       email: safeEmail,
@@ -435,16 +537,22 @@ async function doSyncFirebaseUserProfile(
     try {
       await setDoc(privateDocRef, createPrivPayload);
     } catch (error) {
-      handleFirestoreError(error, OperationType.CREATE, `users/${uid}/private/info`);
+      if (!isFirestoreOfflineError(error)) {
+        handleFirestoreError(error, OperationType.CREATE, `users/${uid}/private/info`);
+      }
+      console.warn(`Firestore offline on create(users/${uid}/private/info).`, error);
     }
-  } else if (privSnap.data()?.email !== safeEmail) {
+  } else if (privSnap && privSnap.data()?.email !== safeEmail) {
     try {
       await updateDoc(privateDocRef, {
         email: safeEmail,
         updatedAt: serverTimestamp(),
       });
     } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `users/${uid}/private/info`);
+      if (!isFirestoreOfflineError(error)) {
+        handleFirestoreError(error, OperationType.UPDATE, `users/${uid}/private/info`);
+      }
+      console.warn(`Firestore offline on update(users/${uid}/private/info).`, error);
     }
   }
 
@@ -465,19 +573,15 @@ async function doSyncFirebaseUserProfile(
   }
 
   const [freshPub, freshPriv, isAdmin] = await Promise.all([
-    getDoc(userDocRef).catch((error) =>
-      handleFirestoreError(error, OperationType.GET, `users/${uid}`)
-    ),
-    getDoc(privateDocRef).catch((error) =>
-      handleFirestoreError(error, OperationType.GET, `users/${uid}/private/info`)
-    ),
+    getDocResilient(userDocRef, `users/${uid}`),
+    getDocResilient(privateDocRef, `users/${uid}/private/info`),
     typeof isAdminOverride === 'boolean' ? Promise.resolve(isAdminOverride) : checkIsFirebaseAdmin(fbUser),
   ]);
 
   return buildAppUserFromFirestore(
     fbUser,
-    freshPub.data() as Record<string, unknown> | undefined,
-    freshPriv.data() as Record<string, unknown> | undefined,
+    (freshPub?.data() ?? pubSnap.data()) as Record<string, unknown> | undefined,
+    (freshPriv?.data() ?? privSnap?.data()) as Record<string, unknown> | undefined,
     isAdmin
   );
 }
@@ -654,7 +758,8 @@ export async function submitRestaurantOwnerResubmission(
 export function subscribeMyFirebaseUser(
   fbUser: FirebaseUser,
   onUser: (user: User) => void,
-  isAdmin = false
+  isAdmin = false,
+  onError?: (err: FirestoreListenerError) => void
 ): Unsubscribe {
   let latestPub: Record<string, unknown> | null = null;
   let latestPriv: Record<string, unknown> | null = null;
@@ -674,7 +779,7 @@ export function subscribeMyFirebaseUser(
       }
     },
     (error) => {
-      handleFirestoreError(error, OperationType.GET, `users/${fbUser.uid}`);
+      onError?.(parseFirestoreListenerError(error, OperationType.GET, `users/${fbUser.uid}`));
     }
   );
 
@@ -687,10 +792,12 @@ export function subscribeMyFirebaseUser(
       }
     },
     (error) => {
-      handleFirestoreError(
-        error,
-        OperationType.GET,
-        `users/${fbUser.uid}/private/info`
+      onError?.(
+        parseFirestoreListenerError(
+          error,
+          OperationType.GET,
+          `users/${fbUser.uid}/private/info`
+        )
       );
     }
   );
@@ -771,7 +878,8 @@ function mapFirestoreListing(id: string, data: Record<string, unknown>): Listing
 }
 
 export function subscribeActiveFirestoreListings(
-  onListings: (listings: Listing[]) => void
+  onListings: (listings: Listing[]) => void,
+  onError?: (err: FirestoreListenerError) => void
 ): Unsubscribe {
   const q = query(collection(db, 'listings'), where('status', '==', 'active'));
   return onSnapshot(
@@ -784,14 +892,15 @@ export function subscribeActiveFirestoreListings(
       onListings(items);
     },
     (error) => {
-      handleFirestoreError(error, OperationType.LIST, 'listings');
+      onError?.(parseFirestoreListenerError(error, OperationType.LIST, 'listings'));
     }
   );
 }
 
 export function subscribeMyDonorListings(
   donorId: string,
-  onListings: (listings: Listing[]) => void
+  onListings: (listings: Listing[]) => void,
+  onError?: (err: FirestoreListenerError) => void
 ): Unsubscribe {
   const q = query(collection(db, 'listings'), where('donorId', '==', donorId));
   return onSnapshot(
@@ -804,7 +913,7 @@ export function subscribeMyDonorListings(
       onListings(items);
     },
     (error) => {
-      handleFirestoreError(error, OperationType.LIST, 'listings');
+      onError?.(parseFirestoreListenerError(error, OperationType.LIST, 'listings'));
     }
   );
 }
@@ -1001,7 +1110,8 @@ export async function deleteFirestoreListing(listingId: string): Promise<void> {
 
 export function subscribeMyFirestoreDonations(
   userId: string,
-  onDonations: (donations: DonationRecord[]) => void
+  onDonations: (donations: DonationRecord[]) => void,
+  onError?: (err: FirestoreListenerError) => void
 ): Unsubscribe {
   const q = query(collection(db, 'donations'), where('userId', '==', userId));
   return onSnapshot(
@@ -1030,7 +1140,7 @@ export function subscribeMyFirestoreDonations(
       onDonations(items);
     },
     (error) => {
-      handleFirestoreError(error, OperationType.LIST, 'donations');
+      onError?.(parseFirestoreListenerError(error, OperationType.LIST, 'donations'));
     }
   );
 }
@@ -1096,7 +1206,8 @@ export async function createFirestoreDonation(
 
 export function subscribeMyFirestoreShiftSignups(
   userId: string,
-  onSignups: (byShiftId: Record<string, ShiftSignup>, totalHours: number) => void
+  onSignups: (byShiftId: Record<string, ShiftSignup>, totalHours: number) => void,
+  onError?: (err: FirestoreListenerError) => void
 ): Unsubscribe {
   const q = query(collection(db, 'shiftSignups'), where('userId', '==', userId));
   return onSnapshot(
@@ -1138,7 +1249,7 @@ export function subscribeMyFirestoreShiftSignups(
       onSignups(map, Math.round(totalHours * 10) / 10);
     },
     (error) => {
-      handleFirestoreError(error, OperationType.LIST, 'shiftSignups');
+      onError?.(parseFirestoreListenerError(error, OperationType.LIST, 'shiftSignups'));
     }
   );
 }
@@ -1274,7 +1385,8 @@ export async function createFirestoreClaimIfSupported(
 export function subscribeMyFirestoreClaims(
   uid: string,
   role: 'recipient' | 'donor',
-  onClaims: (claims: Claim[]) => void
+  onClaims: (claims: Claim[]) => void,
+  onError?: (err: FirestoreListenerError) => void
 ): Unsubscribe {
   const field = role === 'donor' ? 'donorId' : 'recipientId';
   const q = query(collection(db, 'claims'), where(field, '==', uid));
@@ -1318,7 +1430,7 @@ export function subscribeMyFirestoreClaims(
       onClaims(items);
     },
     (error) => {
-      handleFirestoreError(error, OperationType.LIST, 'claims');
+      onError?.(parseFirestoreListenerError(error, OperationType.LIST, 'claims'));
     }
   );
 }

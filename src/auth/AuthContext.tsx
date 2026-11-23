@@ -28,7 +28,7 @@ import type {
   User,
 } from '../types';
 import { api, getStoredToken, setStoredToken } from '../lib/api';
-import { auth, googleProvider } from '../firebase';
+import { auth, googleProvider, isFirestoreOfflineError, reconnectFirestore } from '../firebase';
 import {
   buildAppUserFromFirestore,
   checkIsFirebaseAdmin,
@@ -290,8 +290,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setFirebaseUser(fbUser);
 
         if (verifiedReady) {
+          let adminFlag = false;
           try {
-            const adminFlag = await checkIsFirebaseAdmin(fbUser);
+            adminFlag = await checkIsFirebaseAdmin(fbUser);
             const syncedUser = await syncFirebaseUserProfile(
               fbUser,
               langRef.current,
@@ -301,6 +302,40 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             clearPendingProfile(fbUser.uid);
             if (!active) return;
             setUser(syncedUser);
+          } catch (err) {
+            console.error('Failed to sync Firebase user profile:', err);
+            if (isFirestoreOfflineError(err) && active) {
+              void reconnectFirestore();
+              setUser(
+                buildAppUserFromFirestore(
+                  fbUser,
+                  {
+                    uid: fbUser.uid,
+                    name: pending?.displayName || fbUser.displayName || undefined,
+                    displayName: pending?.displayName || fbUser.displayName || undefined,
+                    email: fbUser.email || '',
+                    role:
+                      pending?.role ||
+                      (pending?.accountType === 'restaurantOwner' ? 'restaurantOwner' : 'user'),
+                    area: pending?.restaurant?.area || pending?.area || 'Dhanmondi',
+                    verified: fbUser.emailVerified,
+                    discoverable: true,
+                    language: langRef.current,
+                    savedRadiusKm: 10,
+                    restaurant: pending?.restaurant,
+                  },
+                  {
+                    uid: fbUser.uid,
+                    email: fbUser.email || '',
+                    phone: pending?.restaurant?.phone || pending?.phone,
+                    address: pending?.restaurant?.address || pending?.address,
+                  },
+                  adminFlag
+                )
+              );
+            }
+          }
+          if (active) {
             profileUnsub = subscribeMyFirebaseUser(
               fbUser,
               (liveUser) => {
@@ -310,8 +345,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               },
               adminFlag
             );
-          } catch (err) {
-            console.error('Failed to sync Firebase user profile:', err);
           }
         } else {
           setUser(buildUnverifiedAppUser(fbUser, langRef.current, pending));

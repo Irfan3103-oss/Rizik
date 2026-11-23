@@ -3,16 +3,21 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../data/demo_personas.dart';
 import '../i18n/i18n_provider.dart';
 import '../models/models.dart';
 import '../providers/auth_provider.dart';
 import '../services/admin_chat_service.dart';
 import '../services/api_service.dart';
+import '../services/community_rooms_service.dart';
+import '../services/firestore_error_helper.dart';
 import '../services/messenger_service.dart';
 import '../theme/palettes.dart';
 import '../widgets/admin_chat_sheet.dart';
 import '../widgets/common_widgets.dart';
 import '../widgets/find_people_sheet.dart';
+import '../widgets/health_check_sheet.dart';
+import 'community_room_screen.dart';
 
 class ChatScreen extends StatefulWidget {
   final AuthProvider auth;
@@ -45,6 +50,9 @@ class _ChatScreenState extends State<ChatScreen> {
   Map<String, UserDirectoryEntry> _directoryMap = {};
   List<AdminConversation> _adminConvs = [];
   AdminConversation? _myAdminConv;
+  List<CommunityRoom> _rooms = [];
+  FirestoreListenerError? _inboxError;
+  FirestoreListenerError? _threadError;
 
   Conversation? _selected;
   List<ChatMessage> _messages = [];
@@ -62,6 +70,7 @@ class _ChatScreenState extends State<ChatScreen> {
   StreamSubscription? _blockedSub;
   StreamSubscription? _dirSub;
   StreamSubscription? _adminSub;
+  StreamSubscription? _roomsSub;
   Timer? _typingTimer;
 
   bool get _isFirebaseVerified =>
@@ -112,6 +121,13 @@ class _ChatScreenState extends State<ChatScreen> {
 
     final me = widget.auth.user;
     if (_isFirebaseVerified && me != null) {
+      _inboxError = null;
+      _blockedSub?.cancel();
+      _dirSub?.cancel();
+      _fbConvSub?.cancel();
+      _roomsSub?.cancel();
+      _adminSub?.cancel();
+
       _blockedSub = MessengerService.instance
           .watchMyBlockedUsers(me.id)
           .listen((items) {
@@ -121,7 +137,13 @@ class _ChatScreenState extends State<ChatScreen> {
       }, onError: (_) {});
 
       _dirSub = MessengerService.instance
-          .watchDiscoverableDirectory(me.id, pageLimit: 100)
+          .watchDiscoverableDirectory(
+        me.id,
+        pageLimit: 100,
+        onError: (err) {
+          if (mounted) setState(() => _inboxError ??= err);
+        },
+      )
           .listen((res) {
         if (mounted) {
           setState(() {
@@ -130,35 +152,66 @@ class _ChatScreenState extends State<ChatScreen> {
         }
       }, onError: (_) {});
 
+      _roomsSub = CommunityRoomsService.instance
+          .watchCommunityRooms(
+        onError: (err) {
+          if (mounted) setState(() => _inboxError ??= err);
+        },
+      )
+          .listen(
+        (rooms) {
+          if (mounted) setState(() => _rooms = rooms);
+        },
+        onError: (e) {
+          final parsed = e is FirestoreListenerError
+              ? e
+              : parseFirestoreListenerError(e, 'LIST', 'rooms');
+          if (mounted) setState(() => _inboxError ??= parsed);
+        },
+      );
+
       _fbConvSub = MessengerService.instance
           .watchMyConversations(
-            me.id,
-            getBlockedSet: () => _blockedSet,
-            getDirectoryMap: () => _directoryMap,
-          )
-          .listen((list) {
-        if (!mounted) return;
-        setState(() {
-          _fbConvs = list;
-          if (_selected != null) {
-            final updatedSel = list
-                .where((c) => c.id == _selected!.id)
-                .firstOrNull;
-            if (updatedSel != null) _selected = updatedSel;
+        me.id,
+        getBlockedSet: () => _blockedSet,
+        getDirectoryMap: () => _directoryMap,
+        onError: (err) {
+          if (mounted) setState(() => _inboxError = err);
+        },
+      )
+          .listen(
+        (list) {
+          if (!mounted) return;
+          setState(() {
+            _fbConvs = list;
+            _inboxError = null;
+            if (_selected != null) {
+              final updatedSel = list
+                  .where((c) => c.id == _selected!.id)
+                  .firstOrNull;
+              if (updatedSel != null) _selected = updatedSel;
+            }
+          });
+          for (final c in list) {
+            if (c.unreadCount > 0 && _selected?.id != c.id) {
+              unawaited(MessengerService.instance
+                  .markConversationUnreadAsDelivered(c.id, me.id,
+                      isDemo: c.isDemo));
+            }
           }
-        });
-        for (final c in list) {
-          if (c.unreadCount > 0 && _selected?.id != c.id) {
-            unawaited(MessengerService.instance
-                .markConversationUnreadAsDelivered(c.id, me.id));
+          if (widget.initialConvId != null && _selected == null) {
+            final match =
+                list.where((c) => c.id == widget.initialConvId).firstOrNull;
+            if (match != null) _openConv(match);
           }
-        }
-        if (widget.initialConvId != null && _selected == null) {
-          final match =
-              list.where((c) => c.id == widget.initialConvId).firstOrNull;
-          if (match != null) _openConv(match);
-        }
-      }, onError: (_) {});
+        },
+        onError: (e) {
+          final parsed = e is FirestoreListenerError
+              ? e
+              : parseFirestoreListenerError(e, 'LIST', 'conversations');
+          if (mounted) setState(() => _inboxError = parsed);
+        },
+      );
 
       if (widget.auth.isAdmin) {
         _adminSub = AdminChatService.instance
@@ -212,6 +265,7 @@ class _ChatScreenState extends State<ChatScreen> {
     _blockedSub?.cancel();
     _dirSub?.cancel();
     _adminSub?.cancel();
+    _roomsSub?.cancel();
     _typingTimer?.cancel();
     _searchCtrl.dispose();
     _msgCtrl.dispose();
@@ -323,12 +377,17 @@ class _ChatScreenState extends State<ChatScreen> {
 
   void _subscribeFirestoreMessages(Conversation conv, String myUid) {
     _fbMsgSub?.cancel();
+    setState(() => _threadError = null);
     _fbMsgSub = MessengerService.instance
         .watchConversationMessages(
       conv.id,
       myUid,
       peerUid: conv.peerUid,
       pageSize: _messagePageSize,
+      isDemo: conv.isDemo,
+      onError: (err) {
+        if (mounted) setState(() => _threadError = err);
+      },
     )
         .listen(
       (page) {
@@ -336,6 +395,7 @@ class _ChatScreenState extends State<ChatScreen> {
         setState(() {
           _messages = page.messages;
           _hasOlderMessages = page.hasMore;
+          _threadError = null;
         });
         unawaited(MessengerService.instance.markConversationDeliveredAndRead(
           conversation: conv,
@@ -344,7 +404,13 @@ class _ChatScreenState extends State<ChatScreen> {
           markRead: true,
         ));
       },
-      onError: (_) {},
+      onError: (e) {
+        final parsed = e is FirestoreListenerError
+            ? e
+            : parseFirestoreListenerError(
+                e, 'LIST', 'conversations/${conv.id}/messages');
+        if (mounted) setState(() => _threadError = parsed);
+      },
     );
   }
 
@@ -409,6 +475,7 @@ class _ChatScreenState extends State<ChatScreen> {
         locationLabel: locationLabel,
         replyToId: replyId,
         replyToText: replyText,
+        lang: widget.i18n.lang,
       );
       if (mounted) {
         setState(() => _optimisticPending.removeWhere((m) => m.id == tempId));
@@ -472,6 +539,7 @@ class _ChatScreenState extends State<ChatScreen> {
         locationLabel: failedMsg.locationLabel,
         replyToId: failedMsg.replyToId,
         replyToText: failedMsg.replyToText,
+        lang: widget.i18n.lang,
       );
       final queue = await MessengerService.instance.readOfflineMessageQueue(me.id);
       queue.removeWhere((q) => q.tempId == failedMsg.id);
@@ -501,7 +569,8 @@ class _ChatScreenState extends State<ChatScreen> {
     _typingTimer?.cancel();
 
     if (conv.isFirestoreBacked) {
-      unawaited(MessengerService.instance.setMessengerTyping(conv.id, me.id, false));
+      unawaited(MessengerService.instance
+          .setMessengerTyping(conv.id, me.id, false, isDemo: conv.isDemo));
       await _sendFirestoreWithOptimistic(conv: conv, text: text);
     } else {
       ApiService.instance.sendTyping(conv.id, false);
@@ -741,26 +810,309 @@ class _ChatScreenState extends State<ChatScreen> {
           ),
         ),
         if (showSupportCard) _buildSupportBanner(),
+        if (_inboxError != null)
+          FirestoreErrorBanner(
+            error: _inboxError!,
+            i18n: widget.i18n,
+            tokens: widget.tokens,
+            onRetry: _bindListeners,
+            onRunHealthCheck: () => showHealthCheckSheet(
+              context,
+              auth: widget.auth,
+              i18n: widget.i18n,
+              tokens: widget.tokens,
+              mode: widget.auth.isAdmin ? 'admin' : 'user',
+            ),
+          ),
         Expanded(
-          child: convs.isEmpty
-              ? Center(
-                  child: Padding(
+          child: RefreshIndicator(
+            onRefresh: _loadExpressConvs,
+            child: ListView(
+              children: [
+                if (_isFirebaseVerified && _rooms.isNotEmpty)
+                  _buildCommunityRoomsSection(),
+                if (convs.isEmpty)
+                  Padding(
                     padding: const EdgeInsets.all(24),
-                    child: Text(
-                      t('chat.emptyFilter'),
-                      textAlign: TextAlign.center,
-                      style: TextStyle(color: widget.tokens.textMuted),
+                    child: Center(
+                      child: Text(
+                        t('chat.emptyFilter'),
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: widget.tokens.textMuted),
+                      ),
+                    ),
+                  )
+                else
+                  ...convs.map(_buildConversationTile),
+                if (_isFirebaseVerified && _inboxFilter == 'all')
+                  _buildSuggestedChatsSection(),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _startDirectChatWithDirectoryEntry(
+      UserDirectoryEntry entry) async {
+    final me = widget.auth.user;
+    if (me == null) return;
+    try {
+      String convId;
+      if (_isFirebaseVerified) {
+        convId = await MessengerService.instance.getOrCreateDirectConversation(
+          me,
+          entry,
+          lang: widget.i18n.lang,
+        );
+      } else {
+        convId = await ApiService.instance.openDirectConversation(entry.uid);
+        await _loadExpressConvs();
+      }
+      if (!mounted) return;
+      final match = _allConvs.where((c) => c.id == convId).firstOrNull;
+      if (match != null) {
+        _openConv(match);
+      } else {
+        final isDemo = entry.isDemo || entry.uid.startsWith('demo_');
+        setState(() {
+          _selected = Conversation(
+            id: convId,
+            listingId: '',
+            claimId: '',
+            donorId: entry.uid,
+            recipientId: me.id,
+            uidA: isDemo ? me.id : ([me.id, entry.uid]..sort()).first,
+            uidB: isDemo ? entry.uid : ([me.id, entry.uid]..sort()).last,
+            participants: isDemo ? [me.id] : ([me.id, entry.uid]..sort()),
+            conversationKind: isDemo ? 'demo' : 'direct',
+            donorName: entry.effectiveTitle,
+            donorLogoUrl: entry.photoURL,
+            donorVerified: entry.verified,
+            donorArea: entry.area,
+            peerOnline: entry.online,
+            peerLastSeen: entry.lastSeen,
+            peerUid: entry.uid,
+            peerHandle: entry.handle,
+            peerRole: entry.role,
+            peerVerified: entry.verified,
+            peerArea: entry.area,
+            peerRestaurantName: entry.restaurantName,
+            recipientName: me.name,
+            listingTitle: entry.handle,
+            listingPhoto: entry.photoURL ?? '/images/kacchi-biryani.jpg',
+            pickupStart: DateTime.now().toIso8601String(),
+            pickupEnd: DateTime.now().toIso8601String(),
+            isDirect: true,
+            isDemo: isDemo,
+            demoPersonaId: isDemo ? entry.uid : null,
+            isFirestoreBacked: _isFirebaseVerified,
+            createdAt: DateTime.now().toIso8601String(),
+            updatedAt: DateTime.now().toIso8601String(),
+          );
+        });
+        if (_isFirebaseVerified) {
+          _subscribeFirestoreMessages(_selected!, me.id);
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))),
+        );
+      }
+    }
+  }
+
+  Widget _buildCommunityRoomsSection() {
+    final t = widget.i18n.t;
+    final isBn = widget.i18n.isBn;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 6),
+          child: Row(
+            children: [
+              Icon(Icons.forum_rounded, size: 16, color: widget.tokens.primary),
+              const SizedBox(width: 6),
+              Text(
+                t('rooms.title'),
+                style: const TextStyle(
+                    fontSize: 13, fontWeight: FontWeight.w800),
+              ),
+              const SizedBox(width: 8),
+              _smallTag(t('rooms.pinnedBadge'), widget.tokens.soft,
+                  widget.tokens.textOnSurface),
+            ],
+          ),
+        ),
+        SizedBox(
+          height: 92,
+          child: ListView.builder(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 14),
+            itemCount: _rooms.length,
+            itemBuilder: (_, idx) {
+              final room = _rooms[idx];
+              final iconData = room.iconKey == 'restaurant'
+                  ? Icons.storefront_rounded
+                  : room.iconKey == 'volunteer'
+                      ? Icons.volunteer_activism_rounded
+                      : Icons.groups_rounded;
+              return Container(
+                width: 225,
+                margin: const EdgeInsets.only(right: 10),
+                child: Card(
+                  margin: EdgeInsets.zero,
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(18),
+                    onTap: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => CommunityRoomScreen(
+                            room: room,
+                            auth: widget.auth,
+                            i18n: widget.i18n,
+                            tokens: widget.tokens,
+                            onOpenDirectChat: (member) {
+                              _startDirectChatWithDirectoryEntry(
+                                UserDirectoryEntry(
+                                  uid: member.uid,
+                                  displayName: member.displayName,
+                                  handle: member.handle ?? '@member',
+                                  photoURL: member.photoURL,
+                                  role: member.role,
+                                  area: member.area ?? 'Dhaka',
+                                  verified: false,
+                                  discoverable: true,
+                                  online: member.online,
+                                  lastSeen: member.updatedAt,
+                                  isDemo: member.isDemo,
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                      );
+                    },
+                    child: Padding(
+                      padding: const EdgeInsets.all(10),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Icon(iconData,
+                                  size: 18, color: widget.tokens.primary),
+                              const SizedBox(width: 6),
+                              Expanded(
+                                child: Text(
+                                  isBn ? room.nameBn : room.name,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                      fontWeight: FontWeight.w800,
+                                      fontSize: 13),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 4),
+                          Expanded(
+                            child: Text(
+                              room.lastMessage.isNotEmpty
+                                  ? '${room.lastMessageSenderName}: ${room.lastMessage}'
+                                  : (isBn ? room.descriptionBn : room.description),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                  fontSize: 11, color: widget.tokens.textMuted),
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
-                )
-              : RefreshIndicator(
-                  onRefresh: _loadExpressConvs,
-                  child: ListView.builder(
-                    itemCount: convs.length,
-                    itemBuilder: (_, idx) => _buildConversationTile(convs[idx]),
+                ),
+              );
+            },
+          ),
+        ),
+        const SizedBox(height: 6),
+      ],
+    );
+  }
+
+  Widget _buildSuggestedChatsSection() {
+    final t = widget.i18n.t;
+    final existingPeerIds =
+        _fbConvs.map((c) => c.peerUid ?? c.demoPersonaId).whereType<String>().toSet();
+    final suggestions = [rizikTeamPersona, ...demoPersonas]
+        .where((p) => !existingPeerIds.contains(p.id))
+        .take(5)
+        .toList();
+    if (suggestions.isEmpty) return const SizedBox.shrink();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Divider(height: 20),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 2),
+          child: Text(
+            t('chat.suggestedTitle'),
+            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+          child: Text(
+            t('chat.suggestedSub'),
+            style: TextStyle(fontSize: 12, color: widget.tokens.textMuted),
+          ),
+        ),
+        ...suggestions.map((spec) {
+          final entry = personaToDirectoryEntry(spec);
+          return ListTile(
+            leading: ShopAvatar(
+              name: entry.effectiveTitle,
+              imageUrl: entry.photoURL,
+              online: entry.online,
+            ),
+            title: Row(
+              children: [
+                Flexible(
+                  child: Text(
+                    entry.effectiveTitle,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontWeight: FontWeight.w700),
                   ),
                 ),
-        ),
+                const SizedBox(width: 6),
+                _smallTag(
+                  spec.isOfficial ? t('chat.officialBadge') : t('chat.demoBadge'),
+                  spec.isOfficial ? widget.tokens.primary : widget.tokens.soft,
+                  spec.isOfficial ? Colors.white : widget.tokens.textOnSurface,
+                ),
+              ],
+            ),
+            subtitle: Text(
+              '${entry.handle} · ${entry.area}',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 12, color: widget.tokens.textMuted),
+            ),
+            trailing: OutlinedButton(
+              onPressed: () => _startDirectChatWithDirectoryEntry(entry),
+              child: const Text('Chat'),
+            ),
+            onTap: () => _startDirectChatWithDirectoryEntry(entry),
+          );
+        }),
+        const SizedBox(height: 16),
       ],
     );
   }
@@ -996,8 +1348,12 @@ class _ChatScreenState extends State<ChatScreen> {
                 title: Text(c.isMuted ? t('chat.unmute') : t('chat.mute')),
                 onTap: () async {
                   Navigator.pop(ctx);
-                  await MessengerService.instance
-                      .toggleConversationMute(c.id, myId, !c.isMuted);
+                  await MessengerService.instance.toggleConversationMute(
+                    c.id,
+                    myId,
+                    !c.isMuted,
+                    isDemo: c.isDemo,
+                  );
                 },
               ),
               ListTile(
@@ -1008,8 +1364,12 @@ class _ChatScreenState extends State<ChatScreen> {
                     Text(c.isArchived ? t('chat.unarchive') : t('chat.archive')),
                 onTap: () async {
                   Navigator.pop(ctx);
-                  await MessengerService.instance
-                      .toggleConversationArchive(c.id, myId, !c.isArchived);
+                  await MessengerService.instance.toggleConversationArchive(
+                    c.id,
+                    myId,
+                    !c.isArchived,
+                    isDemo: c.isDemo,
+                  );
                 },
               ),
               ListTile(
@@ -1019,8 +1379,11 @@ class _ChatScreenState extends State<ChatScreen> {
                     style: const TextStyle(color: Colors.red)),
                 onTap: () async {
                   Navigator.pop(ctx);
-                  await MessengerService.instance
-                      .deleteConversationForMe(c.id, myId);
+                  await MessengerService.instance.deleteConversationForMe(
+                    c.id,
+                    myId,
+                    isDemo: c.isDemo,
+                  );
                   if (_selected?.id == c.id && mounted) {
                     setState(() => _selected = null);
                   }
@@ -1111,15 +1474,26 @@ class _ChatScreenState extends State<ChatScreen> {
               PopupMenuButton<String>(
                 onSelected: (act) async {
                   if (act == 'mute' && conv.isFirestoreBacked) {
-                    await MessengerService.instance
-                        .toggleConversationMute(conv.id, myId, !conv.isMuted);
+                    await MessengerService.instance.toggleConversationMute(
+                      conv.id,
+                      myId,
+                      !conv.isMuted,
+                      isDemo: conv.isDemo,
+                    );
                   } else if (act == 'archive' && conv.isFirestoreBacked) {
                     await MessengerService.instance.toggleConversationArchive(
-                        conv.id, myId, !conv.isArchived);
+                      conv.id,
+                      myId,
+                      !conv.isArchived,
+                      isDemo: conv.isDemo,
+                    );
                     if (mounted) setState(() => _selected = null);
                   } else if (act == 'delete' && conv.isFirestoreBacked) {
-                    await MessengerService.instance
-                        .deleteConversationForMe(conv.id, myId);
+                    await MessengerService.instance.deleteConversationForMe(
+                      conv.id,
+                      myId,
+                      isDemo: conv.isDemo,
+                    );
                     if (mounted) setState(() => _selected = null);
                   } else if (act == 'block') {
                     if (conv.isFirestoreBacked) {
@@ -1179,6 +1553,20 @@ class _ChatScreenState extends State<ChatScreen> {
           ),
         ),
         const Divider(height: 1),
+        if (_threadError != null)
+          FirestoreErrorBanner(
+            error: _threadError!,
+            i18n: widget.i18n,
+            tokens: widget.tokens,
+            onRetry: () => _subscribeFirestoreMessages(conv, myId),
+            onRunHealthCheck: () => showHealthCheckSheet(
+              context,
+              auth: widget.auth,
+              i18n: widget.i18n,
+              tokens: widget.tokens,
+              mode: widget.auth.isAdmin ? 'admin' : 'user',
+            ),
+          ),
         if (_hasOlderMessages && conv.isFirestoreBacked)
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 6),
@@ -1275,12 +1663,14 @@ class _ChatScreenState extends State<ChatScreen> {
                     onChanged: (v) {
                       if (conv.isFirestoreBacked) {
                         _typingTimer?.cancel();
-                        unawaited(MessengerService.instance
-                            .setMessengerTyping(conv.id, myId, v.isNotEmpty));
+                        unawaited(MessengerService.instance.setMessengerTyping(
+                            conv.id, myId, v.isNotEmpty,
+                            isDemo: conv.isDemo));
                         if (v.isNotEmpty) {
                           _typingTimer = Timer(const Duration(seconds: 2), () {
                             unawaited(MessengerService.instance
-                                .setMessengerTyping(conv.id, myId, false));
+                                .setMessengerTyping(conv.id, myId, false,
+                                    isDemo: conv.isDemo));
                           });
                         }
                       } else {
@@ -1608,7 +1998,13 @@ class _ChatScreenState extends State<ChatScreen> {
                         Navigator.pop(ctx);
                         if (conv.isFirestoreBacked) {
                           await MessengerService.instance
-                              .toggleMessengerReaction(conv.id, m, myId, e);
+                              .toggleMessengerReaction(
+                            conv.id,
+                            m,
+                            myId,
+                            e,
+                            isDemo: conv.isDemo,
+                          );
                         } else {
                           await ApiService.instance.reactToMessage(m.id, e);
                           _openConv(conv);
@@ -1656,8 +2052,12 @@ class _ChatScreenState extends State<ChatScreen> {
                     style: const TextStyle(color: Colors.red)),
                 onTap: () async {
                   Navigator.pop(ctx);
-                  await MessengerService.instance
-                      .deleteMessageForMe(conv.id, m.id, myId);
+                  await MessengerService.instance.deleteMessageForMe(
+                    conv.id,
+                    m.id,
+                    myId,
+                    isDemo: conv.isDemo,
+                  );
                 },
               ),
           ],
@@ -1710,6 +2110,7 @@ class _ChatScreenState extends State<ChatScreen> {
                           senderId: me.id,
                           senderName: me.name,
                           forwardedFromLabel: fromLabel,
+                          lang: widget.i18n.lang,
                         );
                         if (mounted) {
                           ScaffoldMessenger.of(context).showSnackBar(
@@ -1799,72 +2200,7 @@ class _ChatScreenState extends State<ChatScreen> {
           i18n: widget.i18n,
           tokens: widget.tokens,
           blockedUids: _blockedSet,
-          onSelectPerson: (entry) async {
-            final me = widget.auth.user;
-            if (me == null) return;
-            try {
-              String convId;
-              if (_isFirebaseVerified) {
-                convId = await MessengerService.instance
-                    .getOrCreateDirectConversation(me, entry);
-              } else {
-                convId =
-                    await ApiService.instance.openDirectConversation(entry.uid);
-                await _loadExpressConvs();
-              }
-              if (!mounted) return;
-              final match =
-                  _allConvs.where((c) => c.id == convId).firstOrNull;
-              if (match != null) {
-                _openConv(match);
-              } else {
-                setState(() {
-                  _selected = Conversation(
-                    id: convId,
-                    listingId: '',
-                    claimId: '',
-                    donorId: entry.uid,
-                    recipientId: me.id,
-                    uidA: ([me.id, entry.uid]..sort()).first,
-                    uidB: ([me.id, entry.uid]..sort()).last,
-                    participants: [me.id, entry.uid]..sort(),
-                    donorName: entry.effectiveTitle,
-                    donorLogoUrl: entry.photoURL,
-                    donorVerified: entry.verified,
-                    donorArea: entry.area,
-                    peerOnline: entry.online,
-                    peerLastSeen: entry.lastSeen,
-                    peerUid: entry.uid,
-                    peerHandle: entry.handle,
-                    peerRole: entry.role,
-                    peerVerified: entry.verified,
-                    peerArea: entry.area,
-                    peerRestaurantName: entry.restaurantName,
-                    recipientName: me.name,
-                    listingTitle: entry.handle,
-                    listingPhoto: entry.photoURL ?? '/images/kacchi-biryani.jpg',
-                    pickupStart: DateTime.now().toIso8601String(),
-                    pickupEnd: DateTime.now().toIso8601String(),
-                    isDirect: true,
-                    isFirestoreBacked: _isFirebaseVerified,
-                    createdAt: DateTime.now().toIso8601String(),
-                    updatedAt: DateTime.now().toIso8601String(),
-                  );
-                });
-                if (_isFirebaseVerified) {
-                  _subscribeFirestoreMessages(_selected!, me.id);
-                }
-              }
-            } catch (e) {
-              if (mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                      content:
-                          Text(e.toString().replaceFirst('Exception: ', ''))),
-                );
-              }
-            }
-          },
+          onSelectPerson: _startDirectChatWithDirectoryEntry,
         ),
       ),
     );

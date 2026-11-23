@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
 import {
+  AlertTriangle,
   ArrowLeft,
   BadgeCheck,
   Ban,
@@ -7,6 +8,7 @@ import {
   ChevronUp,
   Flag,
   HeartHandshake,
+  HeartPulse,
   Image as ImageIcon,
   Info,
   Languages,
@@ -24,6 +26,7 @@ import {
   VolumeX,
   X,
 } from 'lucide-react';
+import type { FirestoreListenerError } from '../firebase';
 import type {
   CommunityRoom,
   RoomMember,
@@ -53,6 +56,8 @@ interface CommunityRoomViewProps {
   loadingMoreMessages: boolean;
   blockedUids?: Set<string>;
   directoryEntries?: UserDirectoryEntry[];
+  roomMessagesError?: FirestoreListenerError | null;
+  onRunHealthCheck?: () => void;
   sidebarOpenOnDesktop: boolean;
   onShowSidebarDesktop: () => void;
   onBackMobile: () => void;
@@ -131,6 +136,8 @@ export function CommunityRoomView({
   loadingMoreMessages,
   blockedUids,
   directoryEntries = [],
+  roomMessagesError,
+  onRunHealthCheck,
   sidebarOpenOnDesktop,
   onShowSidebarDesktop,
   onBackMobile,
@@ -569,6 +576,28 @@ export function CommunityRoomView({
         </div>
       )}
 
+      {/* Visible Room Messages Error Banner */}
+      {roomMessagesError && (
+        <div className="mx-3 mt-2 p-3 rounded-xl border border-rose-300 bg-rose-50 dark:bg-rose-950/50 dark:border-rose-800 text-rose-900 dark:text-rose-200 flex flex-wrap items-center justify-between gap-2 shrink-0">
+          <div className="flex items-start gap-2 text-xs font-semibold min-w-0">
+            <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-rose-600" />
+            <span>
+              {t('chatErrors.couldNotLoadRoomMessages', { code: roomMessagesError.code })}
+            </span>
+          </div>
+          {onRunHealthCheck && (
+            <button
+              type="button"
+              onClick={onRunHealthCheck}
+              className="min-h-[30px] px-2.5 py-1 rounded-lg bg-white dark:bg-rose-900 text-rose-800 dark:text-rose-100 text-[11px] font-bold inline-flex items-center gap-1 border border-rose-200 cursor-pointer shrink-0"
+            >
+              <HeartPulse className="w-3.5 h-3.5" />
+              {t('healthCheck.runBtn')}
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Messages Feed */}
       <div
         ref={scrollRef}
@@ -596,7 +625,9 @@ export function CommunityRoomView({
           <div className="py-12 text-center space-y-2">
             <Users className="w-9 h-9 mx-auto text-[var(--text-muted)] opacity-40" />
             <p className="text-xs font-medium text-[var(--text-muted)]">
-              {t('rooms.emptyMessages')}
+              {roomMessagesError
+                ? t('chatErrors.couldNotLoadRoomMessages', { code: roomMessagesError.code })
+                : t('rooms.emptyMessages')}
             </p>
           </div>
         ) : (

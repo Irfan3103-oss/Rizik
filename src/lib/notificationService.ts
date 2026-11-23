@@ -16,7 +16,13 @@ import {
   writeBatch,
   type Unsubscribe,
 } from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType } from '../firebase';
+import {
+  db,
+  type FirestoreListenerError,
+  handleFirestoreError,
+  OperationType,
+  parseFirestoreListenerError,
+} from '../firebase';
 import type { NotificationItem, User } from '../types';
 
 function clampStr(val: string | undefined | null, maxLen: number): string {
@@ -38,35 +44,69 @@ function timestampToIso(val: unknown): string {
   return new Date().toISOString();
 }
 
-const inFlightNotifSeed = new Map<string, Promise<void>>();
+export interface NotificationSeedResult {
+  createdCount: number;
+  alreadyHadCount: number;
+  markedFlag: boolean;
+  error?: string;
+}
+
+const inFlightNotifSeed = new Map<string, Promise<NotificationSeedResult>>();
 
 export function seedStarterNotificationsOnce(
   fbUser: FirebaseUser,
-  _appUser: User
-): Promise<void> {
-  const existing = inFlightNotifSeed.get(fbUser.uid);
-  if (existing) return existing;
+  _appUser: User,
+  options?: { forceCheck?: boolean }
+): Promise<NotificationSeedResult> {
+  const forceCheck = Boolean(options?.forceCheck);
+  if (!forceCheck) {
+    const existing = inFlightNotifSeed.get(fbUser.uid);
+    if (existing) return existing;
+  }
 
-  const p = doSeedStarterNotificationsOnce(fbUser).finally(() => {
+  const p = doSeedStarterNotificationsOnce(fbUser, forceCheck).finally(() => {
     inFlightNotifSeed.delete(fbUser.uid);
   });
   inFlightNotifSeed.set(fbUser.uid, p);
   return p;
 }
 
-async function doSeedStarterNotificationsOnce(fbUser: FirebaseUser): Promise<void> {
-  const uid = fbUser.uid;
+async function doSeedStarterNotificationsOnce(
+  fbUser: FirebaseUser,
+  forceCheck = false
+): Promise<NotificationSeedResult> {
+  const uid = sanitizeId(fbUser.uid);
   const userRef = doc(db, 'users', uid);
+  const notifCol = collection(db, 'users', uid, 'notifications');
 
-  let userSnap;
+  let userData: Record<string, unknown> | undefined;
   try {
-    userSnap = await getDoc(userRef);
-  } catch {
-    return;
+    const userSnap = await getDoc(userRef);
+    userData = userSnap.exists() ? (userSnap.data() as Record<string, unknown>) : undefined;
+  } catch (err) {
+    console.warn('[notificationService] Could not read user doc before seeding notifications:', err);
   }
 
-  if (!userSnap.exists()) return;
-  if (userSnap.data()?.notificationsSeeded === true) return;
+  let existingIds = new Set<string>();
+  let totalExisting = 0;
+  try {
+    const existingSnap = await getDocs(query(notifCol, limit(40)));
+    totalExisting = existingSnap.size;
+    existingIds = new Set(existingSnap.docs.map((d) => d.id));
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('[notificationService] Failed reading notifications subcollection:', err);
+    return { createdCount: 0, alreadyHadCount: 0, markedFlag: false, error: msg };
+  }
+
+  // If the user already marked notificationsSeeded AND actually has notifications in Firestore, skip unless forceCheck
+  if (!forceCheck && userData?.notificationsSeeded === true && totalExisting > 0) {
+    return {
+      createdCount: 0,
+      alreadyHadCount: totalExisting,
+      markedFlag: true,
+    };
+  }
 
   const demoTeamConvId = 'demo_team';
   const starters = [
@@ -122,92 +162,173 @@ async function doSeedStarterNotificationsOnce(fbUser: FirebaseUser): Promise<voi
     },
   ];
 
-  const batch = writeBatch(db);
-  for (const item of starters) {
-    batch.set(doc(db, 'users', uid, 'notifications', item.id), {
-      recipientUid: uid,
-      senderUid: uid,
-      senderName: 'Rizik Team',
-      type: item.type,
-      title: clampStr(item.title, 140),
-      titleBn: clampStr(item.titleBn, 180),
-      body: clampStr(item.body, 500),
-      bodyBn: clampStr(item.bodyBn, 600),
-      read: false,
-      isStarter: true,
-      conversationId: item.conversationId,
-      listingId: null,
-      claimId: null,
-      linkTab: item.linkTab,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    });
-  }
-  batch.update(userRef, {
-    notificationsSeeded: true,
-    updatedAt: serverTimestamp(),
-  });
+  // If user already has starter notifications, don't duplicate them
+  const missingStarters = starters.filter((s) => !existingIds.has(s.id));
+  let createdCount = 0;
 
-  try {
-    await batch.commit();
-  } catch (err) {
-    console.warn('Starter notifications seed skipped:', err);
+  // Commit notifications in their own batch (never tie notification creation to a userRef schema update!)
+  if (missingStarters.length > 0 && (totalExisting === 0 || userData?.notificationsSeeded !== true || forceCheck)) {
+    const batch = writeBatch(db);
+    for (const item of missingStarters) {
+      batch.set(doc(db, 'users', uid, 'notifications', item.id), {
+        recipientUid: uid,
+        senderUid: uid,
+        senderName: 'Rizik Team',
+        type: item.type,
+        title: clampStr(item.title, 140),
+        titleBn: clampStr(item.titleBn, 180),
+        body: clampStr(item.body, 500),
+        bodyBn: clampStr(item.bodyBn, 600),
+        read: false,
+        isStarter: true,
+        conversationId: item.conversationId,
+        listingId: null,
+        claimId: null,
+        linkTab: item.linkTab,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+      createdCount += 1;
+    }
+
+    try {
+      await batch.commit();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error('[notificationService] Failed committing starter notifications:', err);
+      return {
+        createdCount: 0,
+        alreadyHadCount: totalExisting,
+        markedFlag: false,
+        error: msg,
+      };
+    }
   }
+
+  let markedFlag = userData?.notificationsSeeded === true;
+  if (!markedFlag && userData) {
+    try {
+      await updateDoc(userRef, {
+        notificationsSeeded: true,
+        updatedAt: serverTimestamp(),
+      });
+      markedFlag = true;
+    } catch (err) {
+      console.warn('[notificationService] Notifications seeded, but could not mark notificationsSeeded flag on user doc:', err);
+    }
+  }
+
+  return {
+    createdCount,
+    alreadyHadCount: totalExisting,
+    markedFlag,
+  };
+}
+
+function mapNotificationDoc(
+  id: string,
+  data: Record<string, unknown>,
+  fallbackUid: string
+): NotificationItem {
+  return {
+    id,
+    userId: String(data.recipientUid ?? fallbackUid),
+    type: String(data.type ?? 'system'),
+    title: String(data.title ?? ''),
+    titleBn: typeof data.titleBn === 'string' ? data.titleBn : null,
+    body: String(data.body ?? ''),
+    bodyBn: typeof data.bodyBn === 'string' ? data.bodyBn : null,
+    payload: {
+      conversationId: data.conversationId ?? null,
+      listingId: data.listingId ?? null,
+      claimId: data.claimId ?? null,
+      linkTab: data.linkTab ?? null,
+    },
+    read: Boolean(data.read),
+    isStarter: Boolean(data.isStarter),
+    conversationId: typeof data.conversationId === 'string' ? data.conversationId : null,
+    listingId: typeof data.listingId === 'string' ? data.listingId : null,
+    claimId: typeof data.claimId === 'string' ? data.claimId : null,
+    linkTab: typeof data.linkTab === 'string' ? data.linkTab : null,
+    senderUid: typeof data.senderUid === 'string' ? data.senderUid : null,
+    senderName: typeof data.senderName === 'string' ? data.senderName : null,
+    createdAt: timestampToIso(data.createdAt),
+  };
 }
 
 export function subscribeUserNotifications(
   uid: string,
-  onNotifications: (items: NotificationItem[]) => void
+  onNotifications: (items: NotificationItem[]) => void,
+  onError?: (err: FirestoreListenerError) => void
 ): Unsubscribe {
-  const q = query(
-    collection(db, 'users', uid, 'notifications'),
+  const safeUid = sanitizeId(uid);
+  let activeUnsub: Unsubscribe = () => {};
+  let disposed = false;
+
+  const attachFallback = () => {
+    if (disposed) return;
+    const fallbackQ = query(collection(db, 'users', safeUid, 'notifications'), limit(60));
+    activeUnsub = onSnapshot(
+      fallbackQ,
+      (snap) => {
+        const items = snap.docs
+          .map((d) => mapNotificationDoc(d.id, d.data() as Record<string, unknown>, safeUid))
+          .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+        onNotifications(items);
+      },
+      (err) => {
+        const parsed = parseFirestoreListenerError(
+          err,
+          OperationType.LIST,
+          `users/${safeUid}/notifications`
+        );
+        onError?.(parsed);
+      }
+    );
+  };
+
+  const primaryQ = query(
+    collection(db, 'users', safeUid, 'notifications'),
     orderBy('createdAt', 'desc'),
     limit(60)
   );
-  return onSnapshot(
-    q,
+
+  activeUnsub = onSnapshot(
+    primaryQ,
     (snap) => {
-      const items: NotificationItem[] = snap.docs.map((d) => {
-        const data = d.data() as Record<string, unknown>;
-        return {
-          id: d.id,
-          userId: String(data.recipientUid ?? uid),
-          type: String(data.type ?? 'system'),
-          title: String(data.title ?? ''),
-          titleBn: typeof data.titleBn === 'string' ? data.titleBn : null,
-          body: String(data.body ?? ''),
-          bodyBn: typeof data.bodyBn === 'string' ? data.bodyBn : null,
-          payload: {
-            conversationId: data.conversationId ?? null,
-            listingId: data.listingId ?? null,
-            claimId: data.claimId ?? null,
-            linkTab: data.linkTab ?? null,
-          },
-          read: Boolean(data.read),
-          isStarter: Boolean(data.isStarter),
-          conversationId: typeof data.conversationId === 'string' ? data.conversationId : null,
-          listingId: typeof data.listingId === 'string' ? data.listingId : null,
-          claimId: typeof data.claimId === 'string' ? data.claimId : null,
-          linkTab: typeof data.linkTab === 'string' ? data.linkTab : null,
-          senderUid: typeof data.senderUid === 'string' ? data.senderUid : null,
-          senderName: typeof data.senderName === 'string' ? data.senderName : null,
-          createdAt: timestampToIso(data.createdAt),
-        };
-      });
+      const items = snap.docs.map((d) =>
+        mapNotificationDoc(d.id, d.data() as Record<string, unknown>, safeUid)
+      );
       onNotifications(items);
     },
     (error) => {
-      handleFirestoreError(error, OperationType.LIST, `users/${uid}/notifications`);
+      const parsed = parseFirestoreListenerError(
+        error,
+        OperationType.LIST,
+        `users/${safeUid}/notifications`
+      );
+      if (parsed.isIndexError) {
+        activeUnsub();
+        attachFallback();
+        return;
+      }
+      onError?.(parsed);
     }
   );
+
+  return () => {
+    disposed = true;
+    activeUnsub();
+  };
 }
 
 export async function markUserNotificationRead(
   uid: string,
   notificationId: string
 ): Promise<void> {
+  const safeUid = sanitizeId(uid);
   try {
-    await updateDoc(doc(db, 'users', uid, 'notifications', notificationId), {
+    await updateDoc(doc(db, 'users', safeUid, 'notifications', notificationId), {
       read: true,
       updatedAt: serverTimestamp(),
     });
@@ -215,14 +336,15 @@ export async function markUserNotificationRead(
     handleFirestoreError(
       error,
       OperationType.UPDATE,
-      `users/${uid}/notifications/${notificationId}`
+      `users/${safeUid}/notifications/${notificationId}`
     );
   }
 }
 
 export async function markAllUserNotificationsRead(uid: string): Promise<void> {
+  const safeUid = sanitizeId(uid);
   try {
-    const snap = await getDocs(collection(db, 'users', uid, 'notifications'));
+    const snap = await getDocs(collection(db, 'users', safeUid, 'notifications'));
     const batch = writeBatch(db);
     let count = 0;
     snap.docs.forEach((d) => {
@@ -235,7 +357,7 @@ export async function markAllUserNotificationsRead(uid: string): Promise<void> {
       await batch.commit();
     }
   } catch (error) {
-    handleFirestoreError(error, OperationType.UPDATE, `users/${uid}/notifications`);
+    handleFirestoreError(error, OperationType.UPDATE, `users/${safeUid}/notifications`);
   }
 }
 
@@ -243,13 +365,14 @@ export async function deleteUserNotification(
   uid: string,
   notificationId: string
 ): Promise<void> {
+  const safeUid = sanitizeId(uid);
   try {
-    await deleteDoc(doc(db, 'users', uid, 'notifications', notificationId));
+    await deleteDoc(doc(db, 'users', safeUid, 'notifications', notificationId));
   } catch (error) {
     handleFirestoreError(
       error,
       OperationType.DELETE,
-      `users/${uid}/notifications/${notificationId}`
+      `users/${safeUid}/notifications/${notificationId}`
     );
   }
 }
@@ -279,18 +402,19 @@ export async function createCrossUserNotification(params: {
   if (!params.recipientUid || params.recipientUid === params.senderUid) return;
   if (params.recipientUid.startsWith('demo_')) return;
 
+  const recipientUid = sanitizeId(params.recipientUid);
   const notifId = sanitizeId(
     `n_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`
   );
   try {
-    await setDoc(doc(db, 'users', params.recipientUid, 'notifications', notifId), {
-      recipientUid: sanitizeId(params.recipientUid),
+    await setDoc(doc(db, 'users', recipientUid, 'notifications', notifId), {
+      recipientUid,
       senderUid: sanitizeId(params.senderUid),
       senderName: clampStr(params.senderName, 120) || 'Rizik User',
       type: params.type,
-      title: clampStr(params.title, 140),
+      title: clampStr(params.title, 140) || 'Rizik',
       titleBn: params.titleBn ? clampStr(params.titleBn, 180) : null,
-      body: clampStr(params.body, 500),
+      body: clampStr(params.body, 500) || 'New update',
       bodyBn: params.bodyBn ? clampStr(params.bodyBn, 600) : null,
       read: false,
       isStarter: false,
@@ -301,7 +425,10 @@ export async function createCrossUserNotification(params: {
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });
-  } catch {
-    // Non-fatal if recipient is a seeded non-Firestore user or blocked
+  } catch (err) {
+    console.warn(
+      `[notificationService] Could not deliver notification (${params.type}) to ${recipientUid}:`,
+      err
+    );
   }
 }

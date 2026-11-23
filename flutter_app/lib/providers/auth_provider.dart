@@ -4,9 +4,10 @@ import 'package:flutter/foundation.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import '../models/models.dart';
 import '../services/api_service.dart';
+import '../services/ensure_account_service.dart';
+import '../services/firestore_error_helper.dart';
 import '../services/firestore_service.dart';
 import '../services/messenger_service.dart';
-import '../services/notification_service.dart';
 
 class AuthProvider extends ChangeNotifier {
   AppUser? _user;
@@ -15,6 +16,7 @@ class AuthProvider extends ChangeNotifier {
   bool _isAdmin = false;
   Timer? _presenceTimer;
   StreamSubscription<AppUser>? _userSub;
+  EnsureAccountReport? _lastEnsureReport;
 
   AuthProvider() {
     _bootstrap();
@@ -27,6 +29,7 @@ class AuthProvider extends ChangeNotifier {
   bool get isAdmin => _isAdmin || _user?.role == UserRole.admin;
   bool get isFirebaseSession => _firebaseUser != null;
   bool get isFirebaseVerified => _firebaseUser?.emailVerified == true;
+  EnsureAccountReport? get lastEnsureReport => _lastEnsureReport;
 
   void _stopFirebaseSideEffects() {
     _presenceTimer?.cancel();
@@ -35,25 +38,62 @@ class AuthProvider extends ChangeNotifier {
     _userSub = null;
   }
 
+  Future<EnsureAccountReport?> runEnsureAccount({bool force = false}) async {
+    final fbUser = _firebaseUser;
+    final currentUser = _user;
+    if (fbUser == null || !fbUser.emailVerified || currentUser == null) {
+      return null;
+    }
+    try {
+      final report = await EnsureAccountService.instance.ensureAccount(
+        fbUser,
+        currentUser,
+        force: force,
+      );
+      _lastEnsureReport = report;
+      if (report.refreshedUser != null) {
+        _user = report.refreshedUser;
+        _isAdmin = _user?.isAdmin == true || _isAdmin;
+      }
+      notifyListeners();
+      return report;
+    } catch (e) {
+      debugPrint('[AuthProvider] ensureAccount failed: $e');
+      return null;
+    }
+  }
+
+  Future<AppUser> _syncProfileOrOfflineFallback(
+    fb_auth.User fbUser, {
+    Map<String, dynamic>? initialPatch,
+    RestaurantInfo? initialRestaurant,
+  }) async {
+    try {
+      return await FirestoreService.instance.syncUserProfile(
+        fbUser,
+        initialPatch: initialPatch,
+        initialRestaurant: initialRestaurant,
+      );
+    } catch (e) {
+      if (!isFirestoreOfflineError(e)) rethrow;
+      debugPrint('[AuthProvider] syncUserProfile offline fallback triggered: $e');
+      unawaited(reconnectFirestore(FirestoreService.instance.db));
+      final email = fbUser.email?.toLowerCase() ?? '';
+      final isAllowlistedAdmin =
+          email == 'jafor05101007@student.ndub.edu.bd' && fbUser.emailVerified;
+      return FirestoreService.instance.buildAppUser(
+        fbUser,
+        pubData: initialPatch,
+        isAdmin: isAllowlistedAdmin,
+      );
+    }
+  }
+
   void _startFirebaseSideEffects(fb_auth.User fbUser, AppUser initialUser) {
     _stopFirebaseSideEffects();
     if (!fbUser.emailVerified) return;
 
-    unawaited(
-      MessengerService.instance
-          .syncUserDirectoryProfile(fbUser, initialUser, online: true)
-          .catchError((_) {}),
-    );
-    unawaited(
-      MessengerService.instance
-          .seedStarterDemoConversationsOnce(fbUser, initialUser)
-          .catchError((_) {}),
-    );
-    unawaited(
-      NotificationService.instance
-          .seedStarterNotificationsOnce(fbUser, initialUser)
-          .catchError((_) {}),
-    );
+    unawaited(runEnsureAccount(force: false));
 
     _presenceTimer = Timer.periodic(const Duration(seconds: 60), (_) {
       final current = _user;
@@ -87,14 +127,17 @@ class AuthProvider extends ChangeNotifier {
         final fbUser = fb_auth.FirebaseAuth.instance.currentUser;
         _firebaseUser = fbUser;
         if (fbUser != null && fbUser.emailVerified) {
-          _user = await FirestoreService.instance.syncUserProfile(fbUser);
+          _user = await _syncProfileOrOfflineFallback(fbUser);
           _isAdmin = _user?.isAdmin == true;
           _startFirebaseSideEffects(fbUser, _user!);
           await ApiService.instance.connectWebSocket();
         }
       }
-    } catch (_) {
-      await ApiService.instance.setStoredToken(null);
+    } catch (e) {
+      debugPrint('[AuthProvider] _bootstrap warning: $e');
+      if (_firebaseUser == null) {
+        await ApiService.instance.setStoredToken(null);
+      }
     } finally {
       _booting = false;
       notifyListeners();
@@ -158,7 +201,7 @@ class AuthProvider extends ChangeNotifier {
 
     await ApiService.instance.setStoredToken(null);
     _firebaseUser = fbUser;
-    _user = await FirestoreService.instance.syncUserProfile(fbUser);
+    _user = await _syncProfileOrOfflineFallback(fbUser);
     _isAdmin = _user?.isAdmin == true;
     _startFirebaseSideEffects(fbUser, _user!);
     await ApiService.instance.connectWebSocket();
@@ -173,7 +216,7 @@ class AuthProvider extends ChangeNotifier {
     await ApiService.instance.setStoredToken(null);
     _firebaseUser = fbUser;
     if (fbUser.emailVerified) {
-      _user = await FirestoreService.instance.syncUserProfile(fbUser);
+      _user = await _syncProfileOrOfflineFallback(fbUser);
       _isAdmin = _user?.isAdmin == true;
       _startFirebaseSideEffects(fbUser, _user!);
       await ApiService.instance.connectWebSocket();
@@ -232,7 +275,7 @@ class AuthProvider extends ChangeNotifier {
     if (reloaded != null && reloaded.emailVerified) {
       await reloaded.getIdToken(true);
       _firebaseUser = reloaded;
-      _user = await FirestoreService.instance.syncUserProfile(
+      _user = await _syncProfileOrOfflineFallback(
         reloaded,
         initialPatch: _pendingSignupPatch,
         initialRestaurant: _pendingRestaurant,

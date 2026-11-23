@@ -89,6 +89,25 @@ const AREA_COORDS: Record<string, { lat: number; lng: number }> = {
   Mohammadpur: { lat: 23.7658, lng: 90.3584 },
 };
 
+function formatAuthError(err: unknown, fallback: string): string {
+  if (!(err instanceof Error)) return fallback;
+  const msg = err.message || fallback;
+  if (msg.startsWith('{') && msg.includes('"error"')) {
+    try {
+      const parsed = JSON.parse(msg) as { error?: string };
+      if (parsed.error) {
+        if (parsed.error.toLowerCase().includes('client is offline')) {
+          return 'Unable to reach Firestore right now (client is offline). Please check your internet connection and try again.';
+        }
+        return parsed.error;
+      }
+    } catch {
+      // Fall through to raw message
+    }
+  }
+  return msg;
+}
+
 export function OnboardingAuth({
   mode,
   onModeChange,
@@ -245,7 +264,7 @@ export function OnboardingAuth({
       const session = await api.login(trimmedIdentifier, password);
       onAuthenticated(session);
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('onboarding.verifyError'));
+      setError(formatAuthError(err, t('onboarding.verifyError')));
     } finally {
       setLoading(false);
     }
@@ -424,7 +443,7 @@ export function OnboardingAuth({
       });
       onAuthenticated(session);
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('onboarding.verifyError'));
+      setError(formatAuthError(err, t('onboarding.verifyError')));
     } finally {
       setLoading(false);
     }
@@ -591,7 +610,7 @@ export function OnboardingAuth({
         });
         onAuthenticated(session);
       } catch (err) {
-        setGoogleError(err instanceof Error ? err.message : t('onboarding.verifyError'));
+        setGoogleError(formatAuthError(err, t('onboarding.verifyError')));
       } finally {
         setGoogleLoading(false);
       }
@@ -612,7 +631,7 @@ export function OnboardingAuth({
       );
       onAuthenticated(session);
     } catch (err) {
-      setGoogleError(err instanceof Error ? err.message : t('onboarding.verifyError'));
+      setGoogleError(formatAuthError(err, t('onboarding.verifyError')));
     } finally {
       setGoogleLoading(false);
     }

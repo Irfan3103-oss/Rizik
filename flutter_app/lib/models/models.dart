@@ -648,6 +648,10 @@ class Conversation {
   final bool? peerVerified;
   final String? peerArea;
   final String? peerRestaurantName;
+  final String? peerBio;
+  final String? peerBioBn;
+  final double? peerRating;
+  final int? peerReviewCount;
   final String recipientName;
   final String? recipientLogoUrl;
   final String listingTitle;
@@ -659,6 +663,7 @@ class Conversation {
   final bool isDirect;
   final bool isStarter;
   final bool isDemo;
+  final String? demoPersonaId;
   final String? demoShopKey;
   final bool isOfficial;
   final bool isMuted;
@@ -699,6 +704,10 @@ class Conversation {
     this.peerVerified,
     this.peerArea,
     this.peerRestaurantName,
+    this.peerBio,
+    this.peerBioBn,
+    this.peerRating,
+    this.peerReviewCount,
     required this.recipientName,
     this.recipientLogoUrl,
     required this.listingTitle,
@@ -710,6 +719,7 @@ class Conversation {
     this.isDirect = false,
     this.isStarter = false,
     this.isDemo = false,
+    this.demoPersonaId,
     this.demoShopKey,
     this.isOfficial = false,
     this.isMuted = false,
@@ -753,6 +763,10 @@ class Conversation {
         peerVerified: j['peerVerified'] == true,
         peerArea: j['peerArea']?.toString(),
         peerRestaurantName: j['peerRestaurantName']?.toString(),
+        peerBio: j['peerBio']?.toString(),
+        peerBioBn: j['peerBioBn']?.toString(),
+        peerRating: (j['peerRating'] as num?)?.toDouble(),
+        peerReviewCount: (j['peerReviewCount'] as num?)?.toInt(),
         recipientName: (j['recipientName'] ?? 'Neighbor').toString(),
         recipientLogoUrl: j['recipientLogoUrl']?.toString(),
         listingTitle: (j['listingTitle'] ?? '').toString(),
@@ -765,6 +779,7 @@ class Conversation {
         isDirect: j['isDirect'] == true,
         isStarter: j['isStarter'] == true || j['isDemo'] == true,
         isDemo: j['isDemo'] == true,
+        demoPersonaId: j['demoPersonaId']?.toString(),
         demoShopKey: j['demoShopKey']?.toString(),
         isOfficial: j['isOfficial'] == true,
         isMuted: j['isMuted'] == true,
@@ -1678,7 +1693,7 @@ class UserDirectoryEntry {
   final String displayName;
   final String handle;
   final String? photoURL;
-  final String role; // 'user' | 'restaurantOwner' | 'donor' | 'recipient' | 'admin'
+  final String role; // 'user' | 'restaurantOwner' | 'donor' | 'recipient' | 'admin' | 'volunteer' | 'ngo' | 'organizer'
   final String? restaurantName;
   final String? restaurantType;
   final String area;
@@ -1686,6 +1701,12 @@ class UserDirectoryEntry {
   final bool discoverable;
   final bool online;
   final String lastSeen;
+  final bool isDemo;
+  final String? bio;
+  final String? bioBn;
+  final String? openingHours;
+  final double? rating;
+  final int? reviewCount;
 
   const UserDirectoryEntry({
     required this.uid,
@@ -1700,6 +1721,12 @@ class UserDirectoryEntry {
     required this.discoverable,
     required this.online,
     required this.lastSeen,
+    this.isDemo = false,
+    this.bio,
+    this.bioBn,
+    this.openingHours,
+    this.rating,
+    this.reviewCount,
   });
 
   String get effectiveTitle =>
@@ -1793,4 +1820,119 @@ class AdminChatMessage {
     required this.createdAt,
   });
 }
+
+class CommunityRoom {
+  final String id;
+  final String slug;
+  final String name;
+  final String nameBn;
+  final String description;
+  final String descriptionBn;
+  final String iconKey; // 'community' | 'restaurant' | 'volunteer'
+  final int pinnedOrder;
+  final int memberCount;
+  final int onlineCount;
+  final String lastMessage;
+  final String lastMessageSenderName;
+  final String lastMessageAt;
+  final List<String> mutedUids;
+  final bool isDemoSeeded;
+  final String createdAt;
+  final String updatedAt;
+
+  const CommunityRoom({
+    required this.id,
+    required this.slug,
+    required this.name,
+    required this.nameBn,
+    required this.description,
+    required this.descriptionBn,
+    required this.iconKey,
+    required this.pinnedOrder,
+    required this.memberCount,
+    required this.onlineCount,
+    required this.lastMessage,
+    required this.lastMessageSenderName,
+    required this.lastMessageAt,
+    this.mutedUids = const [],
+    this.isDemoSeeded = false,
+    required this.createdAt,
+    required this.updatedAt,
+  });
+}
+
+class RoomMessage {
+  final String id;
+  final String roomId;
+  final String senderId;
+  final String senderName;
+  final String? senderHandle;
+  final String? senderAvatar;
+  final String senderRole;
+  final String? senderArea;
+  final bool senderVerified;
+  final bool senderIsDemo;
+  final String text;
+  final String messageType; // 'text' | 'image'
+  final String? mediaUrl;
+  final String? replyToId;
+  final String? replyToText;
+  final String? replyToSenderName;
+  final Map<String, List<String>> reactions;
+  final List<String> reportedBy;
+  final bool deleted;
+  final bool isDemo;
+  final String createdAt;
+
+  const RoomMessage({
+    required this.id,
+    required this.roomId,
+    required this.senderId,
+    required this.senderName,
+    this.senderHandle,
+    this.senderAvatar,
+    required this.senderRole,
+    this.senderArea,
+    this.senderVerified = false,
+    this.senderIsDemo = false,
+    required this.text,
+    this.messageType = 'text',
+    this.mediaUrl,
+    this.replyToId,
+    this.replyToText,
+    this.replyToSenderName,
+    this.reactions = const {},
+    this.reportedBy = const [],
+    this.deleted = false,
+    this.isDemo = false,
+    required this.createdAt,
+  });
+}
+
+class RoomMember {
+  final String uid;
+  final String displayName;
+  final String? handle;
+  final String? photoURL;
+  final String role;
+  final String? area;
+  final bool online;
+  final bool isDemo;
+  final String? lastMessageAt;
+  final String updatedAt;
+
+  const RoomMember({
+    required this.uid,
+    required this.displayName,
+    this.handle,
+    this.photoURL,
+    required this.role,
+    this.area,
+    this.online = false,
+    this.isDemo = false,
+    this.lastMessageAt,
+    required this.updatedAt,
+  });
+}
+
 

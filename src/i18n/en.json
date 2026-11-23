@@ -527,7 +527,9 @@
     "send": "Send",
     "showConversations": "Show conversations",
     "today": "Today",
-    "yesterday": "Yesterday"
+    "yesterday": "Yesterday",
+    "suggestedChatsTitle": "Suggested chats",
+    "suggestedChatsSubtitle": "Start a demo or community conversation anytime"
   },
   "findPeople": {
     "title": "Find people",
@@ -546,6 +548,9 @@
     "lastSeenHours": "Last seen {{count}}h ago",
     "loadMore": "Load more people",
     "empty": "No discoverable people match your search.",
+    "emptyNotSeededHint": "No demo accounts are seeded yet. Ask an admin to run Seed demo data, or clear filters.",
+    "demoSectionTitle": "Demo accounts",
+    "communitySectionTitle": "Community members",
     "startChat": "Message",
     "opening": "Opening...",
     "privacyNote": "Only public handles & neighborhood areas are shown — emails and phones stay private.",
@@ -1459,7 +1464,10 @@
     "demoSeedingStart": "Preparing demo profiles and rooms...",
     "demoRemovingStart": "Removing demo profiles and seeded messages...",
     "demoSeedSuccess": "Seeded {{personas}} demo profiles, {{rooms}} community rooms, and {{messages}} new messages.",
-    "demoRemoveSuccess": "Removed {{personas}} demo profiles and {{messages}} seeded room messages."
+    "demoRemoveSuccess": "Removed {{personas}} demo profiles and {{messages}} seeded room messages.",
+    "seedDetailPersonas": "Demo Personas",
+    "seedDetailRooms": "Community Rooms",
+    "seedDetailMessages": "Seeded Messages"
   },
   "adminChat": {
     "teamName": "Rizik Team",
@@ -1530,5 +1538,37 @@
     "errTooLong": "Message must be 2000 characters or fewer.",
     "rateLimitHint": "Please wait a moment before sending another message.",
     "sendFailed": "Could not send room message. Please try again."
+  },
+  "chatErrors": {
+    "couldNotLoadChats": "We couldn't load your chats ({{code}}). Please try again or run a health check.",
+    "couldNotLoadMessages": "We couldn't load messages for this chat ({{code}}). Please try again or run a health check.",
+    "couldNotLoadRooms": "We couldn't load community rooms ({{code}}). Please try again or run a health check.",
+    "couldNotLoadRoomMessages": "We couldn't load messages for this room ({{code}}). Please try again or run a health check.",
+    "couldNotLoadPeople": "We couldn't load people in Find people ({{code}}). Please try again or run a health check.",
+    "couldNotLoadNotifications": "We couldn't load your notifications ({{code}}). Please try again or run a health check.",
+    "unverifiedAccountTitle": "Email verification required for real-time chat",
+    "unverifiedAccountBody": "Please verify your email address in Account Settings to unlock real-time chats, Find people, and live notifications.",
+    "goToSettingsBtn": "Open Settings"
+  },
+  "account": {
+    "repairSectionTitle": "Account Self-Repair",
+    "repairSectionDesc": "Recreates missing public profile fields, starter notifications, Rizik Team chat, and community room access.",
+    "repairAccountBtn": "Repair my account",
+    "repairSummary": "Account repair finished: {{fixed}} item(s) fixed, {{errors}} error(s)."
+  },
+  "healthCheck": {
+    "title": "Chat & Data Health Check",
+    "adminCardTitle": "Chat & Data Health Check",
+    "userSubtitle": "Verifies your profile, notifications, real-time chats, Find people, and community room access.",
+    "adminSubtitle": "Full diagnostic across config, permissions, demo data seeding, live room write test, and Firestore indexes.",
+    "runBtn": "Run health check",
+    "runAdminBtn": "Run full health check",
+    "rerun": "Run again",
+    "running": "Running checks...",
+    "passed": "Passed",
+    "warnings": "Warnings",
+    "failed": "Failed",
+    "fixHintLabel": "How to fix",
+    "createIndexLink": "Create Firestore index"
   }
 }
