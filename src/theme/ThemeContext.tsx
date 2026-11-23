@@ -70,7 +70,9 @@ function getInitialDarkMode(): boolean {
   }
   try {
     const saved =
-      localStorage.getItem(THEME_STORAGE_KEY) || localStorage.getItem(LEGACY_THEME_STORAGE_KEY);
+      localStorage.getItem(THEME_STORAGE_KEY) ||
+      localStorage.getItem(LEGACY_THEME_STORAGE_KEY_1) ||
+      localStorage.getItem(LEGACY_THEME_STORAGE_KEY_2);
     if (saved === 'dark') return true;
     if (saved === 'light') return false;
     return window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false;
@@ -82,7 +84,8 @@ function getInitialDarkMode(): boolean {
 function getInitialPalette(): PaletteId {
   try {
     const saved = (localStorage.getItem(PALETTE_STORAGE_KEY) ||
-      localStorage.getItem(LEGACY_PALETTE_STORAGE_KEY)) as PaletteId | null;
+      localStorage.getItem(LEGACY_PALETTE_STORAGE_KEY_1) ||
+      localStorage.getItem(LEGACY_PALETTE_STORAGE_KEY_2)) as PaletteId | null;
     if (saved && VALID_PALETTES.has(saved)) return saved;
   } catch {
     // Ignore storage errors
@@ -94,7 +97,8 @@ function getInitialCustomHex(): string {
   try {
     const saved =
       localStorage.getItem(CUSTOM_COLOR_STORAGE_KEY) ||
-      localStorage.getItem(LEGACY_CUSTOM_COLOR_STORAGE_KEY);
+      localStorage.getItem(LEGACY_CUSTOM_COLOR_STORAGE_KEY_1) ||
+      localStorage.getItem(LEGACY_CUSTOM_COLOR_STORAGE_KEY_2);
     if (saved) return normalizeHex(saved);
   } catch {
     // Ignore
@@ -105,7 +109,8 @@ function getInitialCustomHex(): string {
 function getInitialBgId(): BgPresetId {
   try {
     const saved = (localStorage.getItem(BG_STORAGE_KEY) ||
-      localStorage.getItem(LEGACY_BG_STORAGE_KEY)) as BgPresetId | null;
+      localStorage.getItem(LEGACY_BG_STORAGE_KEY_1) ||
+      localStorage.getItem(LEGACY_BG_STORAGE_KEY_2)) as BgPresetId | null;
     if (saved && VALID_BGS.has(saved)) return saved;
   } catch {
     // Ignore
@@ -117,7 +122,8 @@ function getInitialCustomBgHex(): string {
   try {
     const saved =
       localStorage.getItem(CUSTOM_BG_STORAGE_KEY) ||
-      localStorage.getItem(LEGACY_CUSTOM_BG_STORAGE_KEY);
+      localStorage.getItem(LEGACY_CUSTOM_BG_STORAGE_KEY_1) ||
+      localStorage.getItem(LEGACY_CUSTOM_BG_STORAGE_KEY_2);
     if (saved) return normalizeHex(saved);
   } catch {
     // Ignore
@@ -127,7 +133,7 @@ function getInitialCustomBgHex(): string {
 
 function getInitialRamadanMode(): boolean {
   try {
-    return localStorage.getItem(RAMADAN_MODE_KEY) === '1';
+    return (localStorage.getItem(RAMADAN_MODE_KEY) || localStorage.getItem(LEGACY_RAMADAN_MODE_KEY_1)) === '1';
   } catch {
     return false;
   }

@@ -4435,6 +4435,11 @@ async function startServer() {
       wss.handleUpgrade(request, socket, head, (ws) => {
         wss.emit('connection', ws, request);
       });
+    } else if (
+      process.env.NODE_ENV !== 'production' &&
+      ['vite-hmr', 'vite-ping'].includes(String(request.headers['sec-websocket-protocol'] ?? ''))
+    ) {
+      return;
     } else {
       socket.destroy();
     }
@@ -4535,7 +4540,12 @@ async function startServer() {
 
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
-      server: { middlewareMode: true, hmr: false },
+      server: {
+        middlewareMode: true,
+        hmr: false,
+        allowedHosts: true,
+        ws: { server },
+      },
       appType: 'spa',
     });
     app.use(vite.middlewares);

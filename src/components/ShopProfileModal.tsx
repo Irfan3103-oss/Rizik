@@ -15,6 +15,7 @@ import {
   X,
 } from 'lucide-react';
 import type { Conversation, DonorReviewsResponse } from '../types';
+import { DemoBadge } from './DemoBadge';
 import { ShopAvatar } from './ShopAvatar';
 import { FoodImage } from './FoodImage';
 import { useI18n } from '../i18n/I18nContext';
@@ -47,7 +48,7 @@ export function ShopProfileModal({
   onToggleBlock,
   onReportUser,
 }: ShopProfileModalProps) {
-  const { t, formatNumber, formatWindow, formatAddress, formatHours } = useI18n();
+  const { lang, t, formatNumber, formatWindow, formatAddress, formatHours } = useI18n();
   const [reviewsData, setReviewsData] = useState<DonorReviewsResponse | null>(null);
 
   useEffect(() => {
@@ -130,10 +131,9 @@ export function ShopProfileModal({
                 {statusLine}
               </p>
               {conversation.isDemo ? (
-                <p className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-800 dark:text-amber-200 bg-amber-100/80 dark:bg-amber-950/50 px-2.5 py-0.5 rounded-lg border border-amber-300/40 dark:border-amber-700/40">
-                  <Sparkles className="w-3 h-3" />
-                  {t('shopProfile.demoBadge')}
-                </p>
+                <div className="flex items-center justify-center gap-1.5 pt-0.5">
+                  <DemoBadge />
+                </div>
               ) : (
                 isDonorPeer &&
                 conversation.donorVerified && (
@@ -142,6 +142,17 @@ export function ShopProfileModal({
                     {t('shopProfile.verifiedBadge')}
                   </p>
                 )
+              )}
+              {(conversation.peerRating ?? null) !== null && (
+                <p className="text-[11px] font-semibold text-[var(--text-secondary)] flex items-center justify-center gap-1 tabular-nums">
+                  <Star className="w-3.5 h-3.5 text-amber-500 fill-amber-500 shrink-0" aria-hidden="true" />
+                  <span>{formatNumber(Number(conversation.peerRating).toFixed(1))}</span>
+                  {typeof conversation.peerReviewCount === 'number' && (
+                    <span className="text-[var(--text-muted)]">
+                      ({formatNumber(conversation.peerReviewCount)})
+                    </span>
+                  )}
+                </p>
               )}
               {isDonorPeer && reviewsData && reviewsData.avgRating !== null && (
                 <p className="text-[11px] font-semibold text-[var(--text-secondary)] flex items-center justify-center gap-1 tabular-nums">
@@ -199,6 +210,13 @@ export function ShopProfileModal({
 
           {/* Details */}
           <div className="space-y-2.5 text-xs">
+            {(conversation.peerBio || conversation.peerBioBn) && (
+              <div className="p-3 rounded-xl bg-[var(--bg-subtle)] border border-[var(--border-subtle)] text-[var(--text-secondary)] leading-relaxed">
+                {lang === 'bn' && conversation.peerBioBn
+                  ? conversation.peerBioBn
+                  : conversation.peerBio}
+              </div>
+            )}
             {conversation.donorAddress && (
               <div className="p-3 rounded-xl bg-[var(--bg-subtle)] border border-[var(--border-subtle)] flex items-start gap-2.5">
                 <MapPin className="w-4 h-4 text-[var(--brand-text)] shrink-0 mt-0.5" />

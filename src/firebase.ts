@@ -1,31 +1,54 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider } from 'firebase/auth';
 import { getDatabase, type Database } from 'firebase/database';
-import { doc, getDocFromServer, initializeFirestore } from 'firebase/firestore';
+import { doc, getDocFromServer, getFirestore } from 'firebase/firestore';
 import { getStorage, type FirebaseStorage } from 'firebase/storage';
 import defaultAppletConfig from '../firebase-applet-config.json';
 
+function isPlaceholderEnv(val: unknown): boolean {
+  if (typeof val !== 'string') return true;
+  const trimmed = val.trim();
+  if (!trimmed) return true;
+  return (
+    trimmed.includes('...') ||
+    trimmed.includes('your-') ||
+    trimmed.includes('example') ||
+    trimmed === '123456789012' ||
+    trimmed === '1:123456789012:web:abcdef123456'
+  );
+}
+
+function pickFirebaseEnv(envVal: unknown, fallback: string): string {
+  return isPlaceholderEnv(envVal) ? fallback : String(envVal).trim();
+}
+
+const hasCustomProjectEnv = !isPlaceholderEnv(import.meta.env.VITE_FIREBASE_PROJECT_ID);
+const rawEnvDbId =
+  typeof import.meta.env.VITE_FIREBASE_FIRESTORE_DATABASE_ID === 'string'
+    ? import.meta.env.VITE_FIREBASE_FIRESTORE_DATABASE_ID.trim()
+    : '';
+
 // Read from VITE_FIREBASE_* environment variables, falling back to firebase-applet-config.json
 const firebaseConfig = {
-  apiKey: (import.meta.env.VITE_FIREBASE_API_KEY as string | undefined) || defaultAppletConfig.apiKey,
-  authDomain: (import.meta.env.VITE_FIREBASE_AUTH_DOMAIN as string | undefined) || defaultAppletConfig.authDomain,
-  projectId: (import.meta.env.VITE_FIREBASE_PROJECT_ID as string | undefined) || defaultAppletConfig.projectId,
-  storageBucket: (import.meta.env.VITE_FIREBASE_STORAGE_BUCKET as string | undefined) || defaultAppletConfig.storageBucket,
-  messagingSenderId: (import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID as string | undefined) || defaultAppletConfig.messagingSenderId,
-  appId: (import.meta.env.VITE_FIREBASE_APP_ID as string | undefined) || defaultAppletConfig.appId,
-  firestoreDatabaseId: (import.meta.env.VITE_FIREBASE_FIRESTORE_DATABASE_ID as string | undefined) || defaultAppletConfig.firestoreDatabaseId,
-  measurementId: (import.meta.env.VITE_FIREBASE_MEASUREMENT_ID as string | undefined) || defaultAppletConfig.measurementId || '',
+  apiKey: pickFirebaseEnv(import.meta.env.VITE_FIREBASE_API_KEY, defaultAppletConfig.apiKey),
+  authDomain: pickFirebaseEnv(import.meta.env.VITE_FIREBASE_AUTH_DOMAIN, defaultAppletConfig.authDomain),
+  projectId: pickFirebaseEnv(import.meta.env.VITE_FIREBASE_PROJECT_ID, defaultAppletConfig.projectId),
+  storageBucket: pickFirebaseEnv(import.meta.env.VITE_FIREBASE_STORAGE_BUCKET, defaultAppletConfig.storageBucket),
+  messagingSenderId: pickFirebaseEnv(import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID, defaultAppletConfig.messagingSenderId),
+  appId: pickFirebaseEnv(import.meta.env.VITE_FIREBASE_APP_ID, defaultAppletConfig.appId),
+  firestoreDatabaseId:
+    hasCustomProjectEnv && !isPlaceholderEnv(rawEnvDbId)
+      ? rawEnvDbId
+      : defaultAppletConfig.firestoreDatabaseId,
+  measurementId: pickFirebaseEnv(
+    import.meta.env.VITE_FIREBASE_MEASUREMENT_ID,
+    defaultAppletConfig.measurementId || ''
+  ),
 };
 
 const app = initializeApp(firebaseConfig);
 
-export const db = initializeFirestore(
-  app,
-  {
-    experimentalForceLongPolling: true,
-  },
-  firebaseConfig.firestoreDatabaseId
-);
+export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({ prompt: 'select_account' });
@@ -44,8 +67,9 @@ export const storage = storageInstance;
 // Optional Firebase Realtime Database for ultra-low-latency online presence
 let rtdbInstance: Database | null = null;
 try {
+  const rawRtdbEnv = import.meta.env.VITE_FIREBASE_DATABASE_URL as string | undefined;
   const configuredRtdbUrl =
-    (import.meta.env.VITE_FIREBASE_DATABASE_URL as string | undefined) ||
+    (!isPlaceholderEnv(rawRtdbEnv) ? rawRtdbEnv?.trim() : undefined) ||
     ((defaultAppletConfig as Record<string, unknown>).databaseURL as string | undefined);
   if (configuredRtdbUrl && configuredRtdbUrl.startsWith('https://')) {
     rtdbInstance = getDatabase(app, configuredRtdbUrl);

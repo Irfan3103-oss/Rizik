@@ -396,13 +396,26 @@ async function doSyncFirebaseUserProfile(
       handleFirestoreError(error, OperationType.CREATE, `users/${uid}`);
     }
   } else {
+    const existingData = pubSnap.data() as Record<string, unknown> | undefined;
+    const backfill: Record<string, unknown> = {
+      displayName:
+        clampStr(existingData?.displayName as string | undefined, 100) || displayName,
+      updatedAt: serverTimestamp(),
+    };
+    if (!existingData?.handle) {
+      const slug =
+        displayName
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, '_')
+          .replace(/^_+|_+$/g, '')
+          .slice(0, 14) || 'member';
+      backfill.handle = `@${slug}_${uid.slice(-4).toLowerCase()}`;
+    }
+    if (typeof existingData?.discoverable !== 'boolean') {
+      backfill.discoverable = true;
+    }
     try {
-      await updateDoc(userDocRef, {
-        displayName:
-          clampStr(pubSnap.data()?.displayName as string | undefined, 100) ||
-          displayName,
-        updatedAt: serverTimestamp(),
-      });
+      await updateDoc(userDocRef, backfill);
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `users/${uid}`);
     }

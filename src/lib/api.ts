@@ -74,7 +74,10 @@ export function cacheFeed(listings: Listing[]) {
 
 export function getCachedFeed(): { listings: Listing[]; cachedAt: number } | null {
   try {
-    const raw = localStorage.getItem(FEED_CACHE_KEY) || localStorage.getItem(LEGACY_FEED_CACHE_KEY);
+    const raw =
+      localStorage.getItem(FEED_CACHE_KEY) ||
+      localStorage.getItem(LEGACY_FEED_CACHE_KEY_1) ||
+      localStorage.getItem(LEGACY_FEED_CACHE_KEY_2);
     return raw ? JSON.parse(raw) : null;
   } catch {
     return null;
@@ -92,7 +95,10 @@ export interface QueuedChatMessage {
 
 export function getQueuedMessages(): QueuedChatMessage[] {
   try {
-    const raw = localStorage.getItem(CHAT_QUEUE_KEY) || localStorage.getItem(LEGACY_CHAT_QUEUE_KEY);
+    const raw =
+      localStorage.getItem(CHAT_QUEUE_KEY) ||
+      localStorage.getItem(LEGACY_CHAT_QUEUE_KEY_1) ||
+      localStorage.getItem(LEGACY_CHAT_QUEUE_KEY_2);
     return raw ? JSON.parse(raw) : [];
   } catch {
     return [];

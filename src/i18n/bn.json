@@ -516,7 +516,18 @@
     "reportSubmitted": "আমাদের নিরাপত্তা দলের কাছে রিপোর্ট জমা হয়েছে।",
     "blockedConfirm": "{{name}}-কে ব্লক করা হয়েছে। তার কাছ থেকে আর বার্তা পাবেন না।",
     "unblockedNotice": "{{name}}-কে আনব্লক করা হয়েছে।",
-    "starterSeedDesc": "অফিশিয়াল স্বাগত গাইড ও নমুনা বাংলাদেশি অংশীদার রান্নাঘর"
+    "starterSeedDesc": "অফিশিয়াল স্বাগত গাইড ও নমুনা বাংলাদেশি অংশীদার রান্নাঘর",
+    "attachImage": "ছবি যুক্ত করুন",
+    "emojiPicker": "ইমোজি বাছাই করুন",
+    "loadOlder": "আগের বার্তা দেখুন",
+    "offlinePlaceholder": "অফলাইন — বার্তা পাঠাতে সংযুক্ত হোন",
+    "phoneticToggle": "ফোনেটিক বাংলা (অভ্র)",
+    "react": "বার্তায় রিঅ্যাক্ট করুন",
+    "reply": "উত্তর দিন",
+    "send": "পাঠান",
+    "showConversations": "কথোপকথন দেখান",
+    "today": "আজ",
+    "yesterday": "গতকাল"
   },
   "findPeople": {
     "title": "মানুষ খুঁজুন",
@@ -540,6 +551,9 @@
     "privacyNote": "শুধুমাত্র পাবলিক হ্যান্ডেল ও এলাকা দেখানো হয় — ইমেইল ও ফোন গোপন থাকে।",
     "roleUser": "ব্যবহারকারী",
     "roleRestaurant": "রেস্তোরাঁ মালিক",
+    "roleVolunteer": "স্বেচ্ছাসেবক",
+    "roleNgo": "এনজিও / আশ্রয়কেন্দ্র",
+    "roleOrganizer": "আয়োজক",
     "roleAdmin": "অ্যাডমিন"
   },
   "shopProfile": {
@@ -1435,7 +1449,17 @@
     "notifResubmitted": "আবেদন হালনাগাদ ও পুনরায় জমা: {{restaurant}}",
     "notifNewMessage": "{{restaurant}} থেকে নতুন বার্তা",
     "adminAccountBadge": "অ্যাডমিনিস্ট্রেটর অ্যাকাউন্ট",
-    "openAdminAreaBtn": "অ্যাডমিন প্যানেল খুলুন"
+    "openAdminAreaBtn": "অ্যাডমিন প্যানেল খুলুন",
+    "demoCardTitle": "ডেমো অ্যাকাউন্ট ও রিজিক কমিউনিটি রুম",
+    "demoCardDesc": "১৪টি বাংলাদেশি নমুনা প্রোফাইল ও ৩টি কমিউনিটি রুম (রিজিক কমিউনিটি, রেস্তোরাঁ কর্নার, স্বেচ্ছাসেবক) সিড বা মুছে ফেলুন।",
+    "demoStatusCounts": "{{personas}}টি ডেমো প্রোফাইল · {{rooms}}টি রুম",
+    "seedDemoBtn": "ডেমো ডেটা সিড করুন",
+    "removeDemoBtn": "সব ডেমো ডেটা মুছুন",
+    "confirmRemoveDemoBtn": "মুছে ফেলা নিশ্চিত করুন",
+    "demoSeedingStart": "ডেমো প্রোফাইল ও রুম প্রস্তুত হচ্ছে...",
+    "demoRemovingStart": "ডেমো প্রোফাইল ও সিড করা বার্তা মুছে ফেলা হচ্ছে...",
+    "demoSeedSuccess": "{{personas}}টি ডেমো প্রোফাইল, {{rooms}}টি কমিউনিটি রুম এবং {{messages}}টি নতুন বার্তা সিড হয়েছে।",
+    "demoRemoveSuccess": "{{personas}}টি ডেমো প্রোফাইল এবং {{messages}}টি সিড করা রুমের বার্তা মুছে ফেলা হয়েছে।"
   },
   "adminChat": {
     "teamName": "Rizik টিম",
@@ -1475,5 +1499,36 @@
     },
     "ownerThreadsHeading": "রেস্তোরাঁ মালিকদের চ্যাট ({{count}})",
     "userThreadsHeading": "অ্যাডমিন ও ব্যবহারকারী চ্যাট ({{count}})"
+  },
+  "demo": {
+    "badge": "ডেমো",
+    "tooltip": "প্রিভিউয়ের জন্য ডেমো অ্যাকাউন্ট। এটি প্রকৃত কোনো ব্যক্তি নয়।",
+    "includeDemoChip": "ডেমো অ্যাকাউন্ট দেখান"
+  },
+  "rooms": {
+    "pinnedHeading": "কমিউনিটি রুম",
+    "onlineLabel": "অনলাইন",
+    "membersTitle": "রুমের সদস্য ({{count}})",
+    "memberProfileTitle": "সদস্য প্রোফাইল",
+    "messageUserBtn": "বার্তা পাঠান",
+    "messageShort": "বার্তা",
+    "guidelinesTitle": "রিজিক কমিউনিটি নির্দেশিকা",
+    "guidelinesBody": "সবাইকে সম্মান করুন, যাচাইকৃত উদ্বৃত্ত খাবারের তথ্য দিন, পাবলিক রুমে ব্যক্তিগত ফোন বা ঠিকানা দেবেন না এবং স্প্যাম করবেন না।",
+    "emptyMessages": "এই রুমে এখনো কোনো বার্তা নেই। হ্যালো বলুন!",
+    "removedByModerator": "[মডারেটর কর্তৃক বার্তা সরানো হয়েছে]",
+    "restoreMessage": "পুনরুদ্ধার",
+    "deleteMessage": "বার্তা সরান",
+    "muteUser": "রুমে মিউট করুন",
+    "unmuteUser": "আনমিউট",
+    "mutedBadge": "মিউট",
+    "youAreMuted": "মডারেটর আপনাকে এই রুমে মিউট করেছেন।",
+    "reportMessage": "বার্তা রিপোর্ট করুন",
+    "reportedToast": "বার্তাটি মডারেটরদের কাছে রিপোর্ট করা হয়েছে। রিজিক নিরাপদ রাখতে সহায়তার জন্য ধন্যবাদ।",
+    "replyingTo": "{{name}}-এর উত্তরে",
+    "composerPlaceholder": "#{{room}}-এ বার্তা লিখুন...",
+    "errInvalidImage": "অনুগ্রহ করে একটি সঠিক ছবি বাছাই করুন।",
+    "errTooLong": "বার্তা ২০০০ অক্ষরের মধ্যে হতে হবে।",
+    "rateLimitHint": "আরেকটি বার্তা পাঠানোর আগে একটু অপেক্ষা করুন।",
+    "sendFailed": "রুমের বার্তা পাঠানো যায়নি। আবার চেষ্টা করুন।"
   }
 }

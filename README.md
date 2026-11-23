@@ -1214,6 +1214,7 @@ service cloud.firestore {
             'mutedBy', 'archivedBy', 'deletedFor', 'unreadCount', 'updatedAt'
           ]) || (
             incoming().diff(existing()).affectedKeys().hasOnly([
+              'listingId', 'listingTitle',
               'lastMessage', 'lastMessageType', 'lastMessageSenderId', 'lastMessageAt',
               'unreadCount', 'mutedBy', 'archivedBy', 'deletedFor', 'typingBy',
               'participantProfiles', 'updatedAt'
@@ -1418,5 +1419,34 @@ Defined in `firestore.indexes.json`. Create these in **Firebase Console → Fire
 
 ## 4. Testing Rules in Firebase Console Rules Playground
 
-1. **Firestore Rules**: Open **Firebase Console → Firestore Database → Rules → Rules Playground**, choose **Get / Create / List** on paths like `/userDirectory/{uid}`, `/conversations/direct_{uidA}_{uidB}`, or `/users/{uid}/notifications/{id}`, toggle **Authenticated** with `email_verified: true`, and verify that unauthenticated reads, PII writes to `userDirectory`, or messages between blocked UIDs are denied.
+1. **Firestore Rules**: Open **Firebase Console → Firestore Database → Rules → Rules Playground**, choose **Get / Create / List** on paths like `/userDirectory/{uid}`, `/conversations/direct_{uidA}_{uidB}`, `/rooms/{roomId}/messages/{messageId}`, or `/users/{uid}/notifications/{id}`, toggle **Authenticated** with `email_verified: true`, and verify that unauthenticated reads, PII writes to `userDirectory`, or messages between blocked UIDs are denied.
 2. **Realtime Database Rules**: Open **Realtime Database → Rules → Rules Playground**, simulate a verified user writing `{ "online": true, "lastSeen": 1700000000 }` to `/presence/{uid}` (allowed for matching `auth.uid`, denied for another UID or unverified email).
+
+---
+
+## 5. Demo Personas, Rizik Community Rooms & Multi-User Chat Testing
+
+### 5A. Admin-Only Demo Data Seeding (`Seed demo data` / `Remove all demo data`)
+
+1. Sign in as an Admin account (see Section 4) and open the **Admin** tab (`/admin`).
+2. In the **Demo Accounts & Rizik Community Rooms** card:
+   - Click **Seed demo data** once to idempotently populate:
+     - **14 Bangladeshi sample personas** (`isDemo: true`) in `userDirectory/{personaId}` (7 partner kitchens/bakeries/sweet shops/tea stalls/caterers, 3 volunteers, 2 community recipients, 1 NGO children's shelter, and 1 community organizer).
+     - **3 pinned Community Rooms** (`room_rizik_community`, `room_restaurant_corner`, `room_volunteers`) with realistic bilingual-context starter discussions.
+   - Click **Remove all demo data** → **Confirm remove** at any time to remove all `isDemo: true` profiles and seeded room messages while preserving real user room messages.
+3. **Isolated Client-Side Demo Auto-Replies**:
+   - Every 1-to-1 chat with a demo persona (or starter **Rizik Team** thread) is stored strictly inside the signed-in user's private subcollections (`users/{uid}/demoConversations` and `users/{uid}/demoMessages`).
+   - Replies are generated client-side after a 1–3 second simulated typing indicator and marked **"Auto-reply (demo)"**. Demo messages never alter real user metrics, food rescue stats, donor ratings, or real user notifications. *(If desired later, a Firebase Cloud Function `onDocumentCreated` trigger on `users/{uid}/demoMessages` can replace or extend the client-side auto-responder without schema changes.)*
+
+### 5B. Testing Real-Time Multi-User Chat Across Two Browsers
+
+1. Create **3 test accounts** in **Firebase Console → Authentication → Users → Add user** (ensure their emails are verified, or use real/secondary test inboxes with verification links):
+   - **Normal User**: `test.neighbor@example.com` (role: `user` on signup)
+   - **Restaurant Owner**: `test.kitchen@example.com` (sign up via **Restaurant Owner** and approve in `/admin`)
+   - **Volunteer**: `test.volunteer@example.com` (role: `user` on signup)
+2. Open **two browser sessions** side by side (e.g., Chrome standard window + Chrome Incognito window).
+3. Sign in with Account A in Window 1 and Account B in Window 2.
+4. Click **Inbox** → **New chat / Find people** (or tap any member inside **Rizik Community**), select the other account, and send text, photos, locations, voice notes, or reactions:
+   - Messages, online/last-seen presence, typing indicators, and delivered/read receipts sync in real time over Firestore (`conversations/direct_{sortedUidA}_{sortedUidB}`) and Community Rooms (`rooms/{roomId}/messages`).
+5. **Before Public Launch**: Delete any temporary test users created for QA in **Firebase Console → Authentication → Users** (along with their test `users/{uid}` and `userDirectory/{uid}` documents) so only real accounts and intentionally seeded demo personas remain.
+

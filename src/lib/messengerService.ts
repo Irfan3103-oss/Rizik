@@ -22,9 +22,17 @@ import {
 import { getDownloadURL, ref as storageRef, uploadBytes } from 'firebase/storage';
 import { db, handleFirestoreError, OperationType, storage } from '../firebase';
 import { FOOD_CATEGORY_IMAGES } from '../data/images';
+import {
+  ALL_DEMO_PERSONAS_MAP,
+  generatePersonaAutoReply,
+  RIZIK_TEAM_PERSONA,
+} from '../data/demoPersonas';
 import type {
   ChatMessage,
   Conversation,
+  DemoPersonaSpec,
+  DirectoryRole,
+  Language,
   Listing,
   MessageReaction,
   MessageType,
@@ -205,8 +213,11 @@ async function doSyncUserDirectoryProfile(
     }
   }
 
-  // Ensure handle/discoverable stored on /users/{uid} as well
-  if (existingUserData && !existingUserData.handle) {
+  // Ensure handle and discoverable are persisted on /users/{uid} for both new & existing users
+  if (
+    existingUserData &&
+    (!existingUserData.handle || typeof existingUserData.discoverable !== 'boolean')
+  ) {
     try {
       await updateDoc(userRef, {
         handle,
@@ -238,6 +249,22 @@ export async function updateMyDiscoverableSetting(
   }
 }
 
+function parseDirectoryRole(raw: unknown): DirectoryRole {
+  const s = String(raw ?? 'user');
+  if (
+    s === 'admin' ||
+    s === 'restaurantOwner' ||
+    s === 'donor' ||
+    s === 'recipient' ||
+    s === 'volunteer' ||
+    s === 'ngo' ||
+    s === 'organizer'
+  ) {
+    return s;
+  }
+  return 'user';
+}
+
 export function subscribeDiscoverableDirectory(
   myUid: string,
   pageLimit: number,
@@ -246,7 +273,7 @@ export function subscribeDiscoverableDirectory(
   const q = query(
     collection(db, 'userDirectory'),
     where('discoverable', '==', true),
-    limit(Math.max(20, pageLimit))
+    limit(Math.max(40, pageLimit))
   );
   return onSnapshot(
     q,
@@ -256,34 +283,57 @@ export function subscribeDiscoverableDirectory(
         const data = d.data() as Record<string, unknown>;
         const uid = String(data.uid ?? d.id);
         if (uid === myUid) return;
-        const rawRole = String(data.role ?? 'user');
-        const role: UserDirectoryEntry['role'] =
-          rawRole === 'admin' ||
-          rawRole === 'restaurantOwner' ||
-          rawRole === 'donor' ||
-          rawRole === 'recipient'
-            ? rawRole
-            : 'user';
+        const role = parseDirectoryRole(data.role);
+        const isDemo = Boolean(data.isDemo) || uid.startsWith('demo_');
+        const personaFallback = isDemo ? ALL_DEMO_PERSONAS_MAP.get(uid) : undefined;
         const lastSeenIso = timestampToIso(data.lastSeen);
-        // Treat stale heartbeat (> 2 minutes old) as offline
         const recentlyActive = Date.now() - new Date(lastSeenIso).getTime() < 120_000;
         list.push({
           uid,
-          displayName: String(data.displayName ?? 'Community Member'),
-          handle: String(data.handle ?? generatePublicHandle('member', uid)),
-          photoURL: typeof data.photoURL === 'string' ? data.photoURL : null,
+          displayName: String(data.displayName ?? personaFallback?.displayName ?? 'Community Member'),
+          handle: String(data.handle ?? personaFallback?.handle ?? generatePublicHandle('member', uid)),
+          photoURL:
+            typeof data.photoURL === 'string'
+              ? data.photoURL
+              : personaFallback?.avatar ?? null,
           role,
-          restaurantName: typeof data.restaurantName === 'string' ? data.restaurantName : null,
-          restaurantType: typeof data.restaurantType === 'string' ? data.restaurantType : null,
-          area: String(data.area ?? 'Dhaka'),
+          restaurantName:
+            typeof data.restaurantName === 'string'
+              ? data.restaurantName
+              : personaFallback?.restaurantName ?? null,
+          restaurantType:
+            typeof data.restaurantType === 'string'
+              ? data.restaurantType
+              : personaFallback?.restaurantType ? String(personaFallback.restaurantType) : null,
+          area: String(data.area ?? personaFallback?.area ?? 'Dhaka'),
           verified: Boolean(data.verified),
           discoverable: Boolean(data.discoverable),
-          online: Boolean(data.online) && recentlyActive,
+          online: isDemo ? Boolean(data.online) : Boolean(data.online) && recentlyActive,
           lastSeen: lastSeenIso,
+          isDemo,
+          bio: typeof data.bio === 'string' ? data.bio : personaFallback?.bio ?? null,
+          bioBn: typeof data.bioBn === 'string' ? data.bioBn : personaFallback?.bioBn ?? null,
+          openingHours:
+            typeof data.openingHours === 'string'
+              ? data.openingHours
+              : personaFallback?.openingHours ?? null,
+          rating:
+            typeof data.rating === 'number'
+              ? data.rating
+              : typeof personaFallback?.rating === 'number'
+                ? personaFallback.rating
+                : null,
+          reviewCount:
+            typeof data.reviewCount === 'number'
+              ? data.reviewCount
+              : typeof personaFallback?.reviewCount === 'number'
+                ? personaFallback.reviewCount
+                : null,
         });
       });
 
       list.sort((a, b) => {
+        if (Boolean(a.isDemo) !== Boolean(b.isDemo)) return a.isDemo ? 1 : -1;
         if (a.online !== b.online) return a.online ? -1 : 1;
         return b.lastSeen.localeCompare(a.lastSeen);
       });
@@ -387,247 +437,568 @@ export async function reportUserInFirestore(params: {
   }
 }
 
-// --- Starter / Demo Conversations (Seeded Once Per User) ---
-
-interface DemoShopSpec {
-  key: 'team' | 'biryani' | 'mishti' | 'bakery';
-  shopUid: string;
-  name: string;
-  nameBn: string;
-  handle: string;
-  area: string;
-  avatar: string;
-  hours: string;
-  isOfficial: boolean;
-  sampleMessages: { fromShop: boolean; text: string }[];
-  autoReply: string;
-}
-
-const DEMO_SHOPS: DemoShopSpec[] = [
-  {
-    key: 'team',
-    shopUid: 'demo_team',
-    name: 'Rizik Team',
-    nameBn: 'Rizik Team',
-    handle: '@rizik_team',
-    area: 'Dhaka',
-    avatar: '',
-    hours: '24/7 Support',
-    isOfficial: true,
-    sampleMessages: [
-      {
-        fromShop: true,
-        text: 'Welcome to Rizik Messenger! You can message nearby partner restaurants, claim Flash Rescue batches before closing, or donate surplus meals anytime.',
-      },
-      {
-        fromShop: true,
-        text: 'Quick guide: Tap "New chat" to discover verified kitchens & community members, or tap "Message" on any food listing to coordinate pickup.',
-      },
-    ],
-    autoReply:
-      'Auto-reply (demo): Thanks for reaching out to the Rizik Team! Explore active food batches on Home or invite friends from "Find people".',
-  },
-  {
-    key: 'biryani',
-    shopUid: 'demo_biryani',
-    name: 'Nawab Biryani House',
-    nameBn: 'নবাব বিরিয়ানি হাউস',
-    handle: '@nawab_biryani_demo',
-    area: 'Old Dhaka',
-    avatar: FOOD_CATEGORY_IMAGES.cooked,
-    hours: '11:00 AM - 11:00 PM',
-    isOfficial: false,
-    sampleMessages: [
-      {
-        fromShop: true,
-        text: 'Assalamu Alaikum! We pack fresh leftover chicken & kacchi biryani boxes around 9:45 PM every evening.',
-      },
-      {
-        fromShop: false,
-        text: 'Hi! Around what time can volunteers or neighbors pick up today?',
-      },
-      {
-        fromShop: true,
-        text: 'Usually between 9:50 PM and 10:45 PM at the Chawkbazar side counter. Please bring your QR pickup code!',
-      },
-    ],
-    autoReply:
-      'Auto-reply (demo): Thanks for checking Nawab Biryani House! Evening biryani surplus boxes are usually packed at 9:45 PM.',
-  },
-  {
-    key: 'mishti',
-    shopUid: 'demo_mishti',
-    name: 'Roshmalai Mishti Mahal',
-    nameBn: 'রসমালাই মিষ্টি মহল',
-    handle: '@roshmalai_demo',
-    area: 'Dhanmondi',
-    avatar: '/images/wedding-celebration-bd.jpg',
-    hours: '8:30 AM - 10:30 PM',
-    isOfficial: false,
-    sampleMessages: [
-      {
-        fromShop: true,
-        text: 'Hello! Today we have fresh sealed misti & nimki boxes available for community shelters before 9:30 PM.',
-      },
-      {
-        fromShop: false,
-        text: 'Great! Are the containers sealed for transport?',
-      },
-      {
-        fromShop: true,
-        text: 'Yes, packed in clean food-grade boxes ready for quick collection.',
-      },
-    ],
-    autoReply:
-      'Auto-reply (demo): Roshmalai Mishti Mahal received your demo message! Freshly sealed sweet boxes are shared before closing.',
-  },
-  {
-    key: 'bakery',
-    shopUid: 'demo_bakery',
-    name: 'BanglaOven Artisan Bakery',
-    nameBn: 'বাংলাওভেন আর্টিজান বেকারি',
-    handle: '@banglaoven_demo',
-    area: 'Banani',
-    avatar: FOOD_CATEGORY_IMAGES.bakery,
-    hours: '7:30 AM - 10:00 PM',
-    isOfficial: false,
-    sampleMessages: [
-      {
-        fromShop: true,
-        text: 'Hi neighbor! Whole-wheat buns, sandwich loaves, and croissants are shared every night at 9:15 PM.',
-      },
-      {
-        fromShop: true,
-        text: 'Tap Reply anytime to test demo instant messages and attachments.',
-      },
-    ],
-    autoReply:
-      'Auto-reply (demo): BanglaOven Bakery got your message! Daily bakery surplus packs go live around 9:15 PM.',
-  },
-];
+// --- Isolated Client-Side Demo Persona Conversations (Strictly Under users/{uid}/demo*) ---
 
 const inFlightStarterSeed = new Map<string, Promise<void>>();
 
 export function seedStarterDemoConversationsOnce(
   fbUser: FirebaseUser,
-  appUser: User
+  _appUser: User
 ): Promise<void> {
   const existing = inFlightStarterSeed.get(fbUser.uid);
   if (existing) return existing;
 
-  const p = doSeedStarterDemoConversationsOnce(fbUser, appUser).finally(() => {
+  const p = doSeedStarterDemoConversationsOnce(fbUser).finally(() => {
     inFlightStarterSeed.delete(fbUser.uid);
   });
   inFlightStarterSeed.set(fbUser.uid, p);
   return p;
 }
 
-async function doSeedStarterDemoConversationsOnce(
-  fbUser: FirebaseUser,
-  appUser: User
-): Promise<void> {
+async function doSeedStarterDemoConversationsOnce(fbUser: FirebaseUser): Promise<void> {
   const uid = sanitizeId(fbUser.uid);
-  const userRef = doc(db, 'users', uid);
-
-  let userSnap;
+  const localSeedFlag = `rizik_demo_team_v2_${uid}`;
   try {
-    userSnap = await getDoc(userRef);
+    if (localStorage.getItem(localSeedFlag) === '1') {
+      return;
+    }
+  } catch {
+    // Ignore storage issues
+  }
+
+  const convId = RIZIK_TEAM_PERSONA.id;
+  const teamConvRef = doc(db, 'users', uid, 'demoConversations', convId);
+
+  try {
+    const existingConv = await getDoc(teamConvRef);
+    if (existingConv.exists()) {
+      try {
+        localStorage.setItem(localSeedFlag, '1');
+      } catch {
+        // Ignore
+      }
+      return;
+    }
   } catch {
     return;
   }
-  if (!userSnap.exists()) return;
-  if (userSnap.data()?.starterSeeded === true) return;
 
-  const myName = clampStr(appUser.name || fbUser.displayName, 100) || 'Community Member';
-  const myHandle =
-    clampStr((userSnap.data()?.handle as string | undefined) || appUser.handle, 40) ||
-    generatePublicHandle(myName, uid);
-
-  for (const shop of DEMO_SHOPS) {
-    const convId = sanitizeId(`demo_${uid}_${shop.key}`);
-    const lastSample = shop.sampleMessages[shop.sampleMessages.length - 1];
-
-    try {
-      await setDoc(doc(db, 'conversations', convId), {
-        conversationKind: 'demo',
-        participants: [uid],
-        uidA: uid,
-        uidB: shop.shopUid,
-        donorId: shop.shopUid,
-        recipientId: uid,
-        listingId: `demo_listing_${shop.key}`,
-        donorName: shop.name,
-        recipientName: myName,
-        listingTitle: shop.isOfficial ? 'Official Welcome & Guide' : `${shop.area} · Sample Partner`,
-        isDemo: true,
-        demoShopKey: shop.key,
-        demoOwnerUid: uid,
-        participantProfiles: {
-          [uid]: {
-            displayName: myName,
-            handle: myHandle,
-            role: appUser.isAdmin ? 'admin' : appUser.accountType || 'user',
-            area: appUser.area || 'Dhaka',
-            verified: Boolean(appUser.verified),
-          },
-          [shop.shopUid]: {
-            displayName: shop.name,
-            handle: shop.handle,
-            photoURL: shop.avatar || null,
-            role: shop.isOfficial ? 'admin' : 'restaurantOwner',
-            restaurantName: shop.name,
-            area: shop.area,
-            verified: true,
-            isOfficial: shop.isOfficial,
-          },
-        },
-        lastMessage: clampStr(lastSample.text, 500),
-        lastMessageType: 'text',
-        lastMessageSenderId: lastSample.fromShop ? shop.shopUid : uid,
-        lastMessageAt: serverTimestamp(),
-        unreadCount: { [uid]: 1 },
-        mutedBy: {},
-        archivedBy: {},
-        deletedFor: {},
-        typingBy: {},
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      });
-
-      const batch = writeBatch(db);
-      shop.sampleMessages.forEach((sample, index) => {
-        const msgId = sanitizeId(`demo_msg_${shop.key}_${index}_${Date.now()}`);
-        batch.set(doc(db, 'conversations', convId, 'messages', msgId), {
-          conversationId: convId,
-          participants: [uid],
-          donorId: shop.shopUid,
-          recipientId: uid,
-          senderId: sample.fromShop ? shop.shopUid : uid,
-          senderName: sample.fromShop ? shop.name : myName,
-          text: clampStr(sample.text, 2000),
-          messageType: 'text',
-          deliveredTo: [uid],
-          readBy: sample.fromShop ? [] : [uid],
-          deletedFor: [],
-          status: sample.fromShop ? 'delivered' : 'read',
-          isDemoAutoReply: sample.fromShop,
-          createdAt: serverTimestamp(),
-        });
-      });
-      await batch.commit();
-    } catch (err) {
-      console.warn(`Starter conversation seed error (${shop.key}):`, err);
-    }
-  }
+  const welcomeMsgs = [
+    'Welcome to Rizik! Join Community Rooms above, tap "New chat" to message partner kitchens & neighbors, or message demo personas anytime.',
+    'রিজিক-এ স্বাগতম! উপরে কমিউনিটি রুমে যোগ দিন, "নতুন চ্যাট" থেকে কাছের রেস্তোরাঁ বা প্রতিবেশীর সাথে চ্যাট করুন। এটি একটি ডেমো সহায়তা থ্রেড।',
+  ];
 
   try {
-    await updateDoc(userRef, {
-      starterSeeded: true,
+    const batch = writeBatch(db);
+    batch.set(teamConvRef, {
+      personaId: RIZIK_TEAM_PERSONA.id,
+      personaName: RIZIK_TEAM_PERSONA.displayName,
+      personaHandle: RIZIK_TEAM_PERSONA.handle,
+      personaRole: RIZIK_TEAM_PERSONA.role,
+      personaArea: RIZIK_TEAM_PERSONA.area,
+      personaAvatar: null,
+      personaVerified: true,
+      isOfficial: true,
+      lastMessage: clampStr(welcomeMsgs[1], 500),
+      lastMessageType: 'text',
+      lastMessageSenderId: RIZIK_TEAM_PERSONA.id,
+      lastMessageAt: serverTimestamp(),
+      unreadCount: 1,
+      isMuted: false,
+      isArchived: false,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+
+    welcomeMsgs.forEach((text, index) => {
+      const msgId = sanitizeId(`demo_team_welcome_${index}`);
+      batch.set(doc(db, 'users', uid, 'demoMessages', msgId), {
+        conversationId: convId,
+        personaId: RIZIK_TEAM_PERSONA.id,
+        senderId: RIZIK_TEAM_PERSONA.id,
+        senderName: RIZIK_TEAM_PERSONA.displayName,
+        text: clampStr(text, 2000),
+        messageType: 'text',
+        reactions: {},
+        isDemoAutoReply: true,
+        createdAt: serverTimestamp(),
+      });
+    });
+
+    await batch.commit();
+
+    try {
+      await updateDoc(doc(db, 'users', uid), {
+        starterSeeded: true,
+        updatedAt: serverTimestamp(),
+      });
+    } catch {
+      // Non-fatal
+    }
+    try {
+      localStorage.setItem(localSeedFlag, '1');
+    } catch {
+      // Ignore
+    }
+  } catch (err) {
+    console.warn('Starter demo_team seed skipped:', err);
+  }
+}
+
+function buildPersonaSpecFromEntry(entry: UserDirectoryEntry): DemoPersonaSpec {
+  const known = ALL_DEMO_PERSONAS_MAP.get(entry.uid);
+  if (known) return known;
+  return {
+    id: entry.uid,
+    displayName: entry.restaurantName || entry.displayName,
+    displayNameBn: entry.restaurantName || entry.displayName,
+    handle: entry.handle,
+    role: entry.role,
+    avatar: entry.photoURL ?? null,
+    restaurantName: entry.restaurantName ?? null,
+    restaurantType: entry.restaurantType ?? null,
+    area: entry.area || 'Dhaka',
+    verified: Boolean(entry.verified),
+    bio: entry.bio || `${entry.displayName} in ${entry.area}`,
+    bioBn: entry.bioBn || entry.bio || `${entry.area} এলাকার ${entry.displayName}`,
+    openingHours: entry.openingHours ?? null,
+    rating: entry.rating ?? null,
+    reviewCount: entry.reviewCount ?? null,
+    online: entry.online,
+    categoryKey: entry.role === 'volunteer' ? 'volunteer' : 'team',
+  };
+}
+
+function buildPersonaSpecFromConversation(conv: Conversation): DemoPersonaSpec {
+  const personaId = conv.demoPersonaId || conv.peerUid || conv.id;
+  const known = ALL_DEMO_PERSONAS_MAP.get(personaId);
+  if (known) return known;
+  return {
+    id: personaId,
+    displayName: conv.donorName || 'Demo Partner',
+    displayNameBn: conv.donorName || 'ডেমো পার্টনার',
+    handle: conv.peerHandle || '@demo_partner',
+    role: parseDirectoryRole(conv.peerRole),
+    avatar: conv.donorLogoUrl ?? null,
+    restaurantName: conv.peerRestaurantName ?? null,
+    area: conv.peerArea || 'Dhaka',
+    verified: Boolean(conv.peerVerified),
+    bio: conv.peerBio || '',
+    bioBn: conv.peerBioBn || '',
+    openingHours: conv.donorHours ?? null,
+    rating: conv.peerRating ?? null,
+    reviewCount: conv.peerReviewCount ?? null,
+    online: true,
+    isOfficial: Boolean(conv.isOfficial),
+    categoryKey: 'team',
+  };
+}
+
+export async function getOrCreateDemoPersonaConversation(
+  me: User,
+  target: UserDirectoryEntry,
+  lang: Language = 'en'
+): Promise<string> {
+  const myUid = sanitizeId(me.id);
+  const spec = buildPersonaSpecFromEntry(target);
+  const convId = sanitizeId(spec.id);
+  const convRef = doc(db, 'users', myUid, 'demoConversations', convId);
+
+  try {
+    const existing = await getDoc(convRef);
+    if (existing.exists()) {
+      await updateDoc(convRef, {
+        isArchived: false,
+        updatedAt: serverTimestamp(),
+      });
+      return convId;
+    }
+  } catch {
+    // Proceed to create
+  }
+
+  const greetingText =
+    lang === 'bn'
+      ? `${spec.displayNameBn || spec.displayName}-এ স্বাগতম! (${spec.area}) — ${spec.bioBn}`
+      : `Hi! Welcome to ${spec.displayName} (${spec.area}). ${spec.bio}`;
+
+  const batch = writeBatch(db);
+  batch.set(convRef, {
+    personaId: spec.id,
+    personaName: clampStr(spec.displayName, 120),
+    personaHandle: clampStr(spec.handle, 40),
+    personaRole: spec.role,
+    personaArea: clampStr(spec.area, 80) || 'Dhaka',
+    personaAvatar:
+      typeof spec.avatar === 'string' && spec.avatar.length <= 248000 ? spec.avatar : null,
+    personaVerified: Boolean(spec.verified),
+    isOfficial: Boolean(spec.isOfficial),
+    lastMessage: clampStr(greetingText, 500),
+    lastMessageType: 'text',
+    lastMessageSenderId: spec.id,
+    lastMessageAt: serverTimestamp(),
+    unreadCount: 0,
+    isMuted: false,
+    isArchived: false,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+
+  const greetMsgId = sanitizeId(`demo_greet_${convId}_${Date.now()}`);
+  batch.set(doc(db, 'users', myUid, 'demoMessages', greetMsgId), {
+    conversationId: convId,
+    personaId: spec.id,
+    senderId: spec.id,
+    senderName: clampStr(spec.displayName, 120),
+    text: clampStr(greetingText, 2000),
+    messageType: 'text',
+    reactions: {},
+    isDemoAutoReply: true,
+    createdAt: serverTimestamp(),
+  });
+
+  try {
+    await batch.commit();
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, `users/${myUid}/demoConversations/${convId}`);
+  }
+  return convId;
+}
+
+export function subscribeMyDemoConversations(
+  myUid: string,
+  onConversations: (conversations: Conversation[]) => void
+): Unsubscribe {
+  const safeUid = sanitizeId(myUid);
+  const q = collection(db, 'users', safeUid, 'demoConversations');
+  return onSnapshot(
+    q,
+    (snap) => {
+      const list: Conversation[] = snap.docs.map((d) => {
+        const data = d.data() as Record<string, unknown>;
+        const personaId = String(data.personaId ?? d.id);
+        const spec = ALL_DEMO_PERSONAS_MAP.get(personaId);
+        const personaName = String(data.personaName ?? spec?.displayName ?? 'Demo Partner');
+        const personaAvatar =
+          (typeof data.personaAvatar === 'string' ? data.personaAvatar : null) ??
+          spec?.avatar ??
+          null;
+        const personaRole = parseDirectoryRole(data.personaRole ?? spec?.role ?? 'restaurantOwner');
+        const personaArea = String(data.personaArea ?? spec?.area ?? 'Dhaka');
+        const personaHandle = String(data.personaHandle ?? spec?.handle ?? '@demo_rizik');
+        const lastMsgAt = timestampToIso(data.lastMessageAt ?? data.updatedAt);
+
+        return {
+          id: d.id,
+          listingId: '',
+          claimId: '',
+          donorId: personaId,
+          recipientId: safeUid,
+          uidA: safeUid,
+          uidB: personaId,
+          participants: [safeUid],
+          conversationKind: 'demo',
+          donorRole: personaRole,
+          recipientRole: 'user',
+          donorName: personaName,
+          donorLogoUrl: personaAvatar,
+          donorVerified: Boolean(data.personaVerified ?? spec?.verified),
+          donorArea: personaArea,
+          donorHours: spec?.openingHours ?? null,
+          recipientName: 'You',
+          recipientLogoUrl: null,
+          recipientVerified: true,
+          recipientArea: 'Dhaka',
+          peerUid: personaId,
+          peerHandle: personaHandle,
+          peerRole: personaRole,
+          peerVerified: Boolean(data.personaVerified ?? spec?.verified),
+          peerArea: personaArea,
+          peerRestaurantName: spec?.restaurantName ?? personaName,
+          peerOnline: spec?.online ?? true,
+          peerLastSeen: null,
+          peerTyping: false,
+          peerBio: spec?.bio ?? null,
+          peerBioBn: spec?.bioBn ?? null,
+          peerRating: spec?.rating ?? null,
+          peerReviewCount: spec?.reviewCount ?? null,
+          listingTitle: spec?.isOfficial
+            ? 'Official Guide · Demo'
+            : `${personaArea} · Demo Account`,
+          listingPhoto: personaAvatar || FOOD_CATEGORY_IMAGES.cooked,
+          pickupStart: lastMsgAt,
+          pickupEnd: lastMsgAt,
+          claimStatus: 'requested',
+          isDirect: true,
+          isStarter: true,
+          isDemo: true,
+          demoPersonaId: personaId,
+          demoShopKey: spec?.categoryKey ?? null,
+          isOfficial: Boolean(data.isOfficial ?? spec?.isOfficial),
+          isMuted: Boolean(data.isMuted),
+          isArchived: Boolean(data.isArchived),
+          isFirestoreBacked: true,
+          lastMessage: typeof data.lastMessage === 'string' ? data.lastMessage : '',
+          lastMessageType: mapMessageTypeFromFirestore(data.lastMessageType),
+          lastMessageSenderId:
+            typeof data.lastMessageSenderId === 'string' ? data.lastMessageSenderId : null,
+          lastMessageAt: lastMsgAt,
+          unreadCount: Number(data.unreadCount ?? 0),
+          isBlocked: false,
+          blockedByMe: false,
+          createdAt: timestampToIso(data.createdAt),
+          updatedAt: timestampToIso(data.updatedAt),
+        };
+      });
+      list.sort((a, b) =>
+        (b.lastMessageAt || b.updatedAt).localeCompare(a.lastMessageAt || a.updatedAt)
+      );
+      onConversations(list);
+    },
+    (error) => {
+      handleFirestoreError(error, OperationType.LIST, `users/${safeUid}/demoConversations`);
+    }
+  );
+}
+
+export function subscribeDemoConversationMessages(
+  myUid: string,
+  convId: string,
+  pageSize: number,
+  onMessages: (messages: ChatMessage[], hasMore: boolean) => void
+): Unsubscribe {
+  const safeUid = sanitizeId(myUid);
+  const safeConvId = sanitizeId(convId);
+  const q = query(
+    collection(db, 'users', safeUid, 'demoMessages'),
+    where('conversationId', '==', safeConvId)
+  );
+  return onSnapshot(
+    q,
+    (snap) => {
+      const all: ChatMessage[] = [];
+      snap.docs.forEach((d) => {
+        const mapped = mapFirestoreChatMessage(d.id, d.data() as Record<string, unknown>, safeUid);
+        if (mapped) {
+          all.push({ ...mapped, status: 'read' });
+        }
+      });
+      all.sort((a, b) => a.sentAt.localeCompare(b.sentAt));
+      const hasMore = all.length > pageSize;
+      onMessages(all.slice(-pageSize), hasMore);
+    },
+    (error) => {
+      handleFirestoreError(error, OperationType.LIST, `users/${safeUid}/demoMessages`);
+    }
+  );
+}
+
+export async function sendDemoPersonaMessage(params: {
+  myUid: string;
+  myName: string;
+  conversation: Conversation;
+  text: string;
+  messageType?: MessageType;
+  mediaUrl?: string | null;
+  fileName?: string | null;
+  fileSize?: number | null;
+  fileMime?: string | null;
+  durationSec?: number | null;
+  locationLat?: number | null;
+  locationLng?: number | null;
+  locationLabel?: string | null;
+  locationExpiresAt?: string | null;
+  replyToId?: string | null;
+  replyToText?: string | null;
+  forwardedFrom?: string | null;
+}): Promise<string> {
+  const myUid = sanitizeId(params.myUid);
+  const convId = sanitizeId(params.conversation.id);
+  const personaId = sanitizeId(params.conversation.demoPersonaId || params.conversation.peerUid || convId);
+  const fsType = mapMessageTypeToFirestore(params.messageType);
+
+  const cleanText =
+    clampStr(params.text, 2000) ||
+    (fsType === 'image'
+      ? 'Photo'
+      : fsType === 'file'
+        ? params.fileName || 'Attachment'
+        : fsType === 'location'
+          ? params.locationLabel || 'Shared location'
+          : fsType === 'audio'
+            ? 'Voice note'
+            : 'Message');
+
+  const safeMedia =
+    typeof params.mediaUrl === 'string' && params.mediaUrl.length <= 445000
+      ? params.mediaUrl
+      : null;
+
+  const msgId = sanitizeId(`dm_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`);
+  const previewText =
+    fsType === 'image'
+      ? '📷 Photo'
+      : fsType === 'file'
+        ? `📎 ${clampStr(params.fileName, 60) || 'File'}`
+        : fsType === 'location'
+          ? `📍 ${clampStr(params.locationLabel, 80) || 'Location'}`
+          : fsType === 'audio'
+            ? '🎤 Voice note'
+            : cleanText;
+
+  const batch = writeBatch(db);
+  batch.set(doc(db, 'users', myUid, 'demoMessages', msgId), {
+    conversationId: convId,
+    personaId,
+    senderId: myUid,
+    senderName: clampStr(params.myName, 120) || 'Member',
+    text: cleanText,
+    messageType: fsType,
+    mediaUrl: safeMedia,
+    fileName: params.fileName ? clampStr(params.fileName, 160) : null,
+    fileSize: typeof params.fileSize === 'number' ? Math.max(0, Math.round(params.fileSize)) : null,
+    fileMime: params.fileMime ? clampStr(params.fileMime, 100) : null,
+    locationLat: typeof params.locationLat === 'number' ? params.locationLat : null,
+    locationLng: typeof params.locationLng === 'number' ? params.locationLng : null,
+    locationLabel: params.locationLabel ? clampStr(params.locationLabel, 160) : null,
+    locationExpiresAt: params.locationExpiresAt ? clampStr(params.locationExpiresAt, 64) : null,
+    durationSec:
+      typeof params.durationSec === 'number'
+        ? Math.max(0, Math.min(600, Math.round(params.durationSec)))
+        : null,
+    replyToId: params.replyToId ? sanitizeId(params.replyToId) : null,
+    replyToText: params.replyToText ? clampStr(params.replyToText, 200) : null,
+    forwardedFrom: params.forwardedFrom ? clampStr(params.forwardedFrom, 120) : null,
+    reactions: {},
+    isDemoAutoReply: false,
+    createdAt: serverTimestamp(),
+  });
+
+  batch.update(doc(db, 'users', myUid, 'demoConversations', convId), {
+    lastMessage: clampStr(previewText, 500),
+    lastMessageType: fsType,
+    lastMessageSenderId: myUid,
+    lastMessageAt: serverTimestamp(),
+    unreadCount: 0,
+    updatedAt: serverTimestamp(),
+  });
+
+  await batch.commit();
+  return cleanText;
+}
+
+export async function triggerDemoPersonaAutoReply(params: {
+  myUid: string;
+  conversation: Conversation;
+  userText: string;
+  lang: Language;
+  markUnread?: boolean;
+}): Promise<void> {
+  const myUid = sanitizeId(params.myUid);
+  const convId = sanitizeId(params.conversation.id);
+  const spec = buildPersonaSpecFromConversation(params.conversation);
+  const replyText = generatePersonaAutoReply(spec, params.userText, params.lang);
+
+  const replyId = sanitizeId(`demo_ar_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`);
+  const batch = writeBatch(db);
+  batch.set(doc(db, 'users', myUid, 'demoMessages', replyId), {
+    conversationId: convId,
+    personaId: spec.id,
+    senderId: spec.id,
+    senderName: clampStr(spec.displayName, 120),
+    text: clampStr(replyText, 2000),
+    messageType: 'text',
+    reactions: {},
+    isDemoAutoReply: true,
+    createdAt: serverTimestamp(),
+  });
+
+  batch.update(doc(db, 'users', myUid, 'demoConversations', convId), {
+    lastMessage: clampStr(replyText, 500),
+    lastMessageType: 'text',
+    lastMessageSenderId: spec.id,
+    lastMessageAt: serverTimestamp(),
+    unreadCount: params.markUnread ? increment(1) : 0,
+    updatedAt: serverTimestamp(),
+  });
+
+  try {
+    await batch.commit();
+  } catch {
+    // Ignore if conversation was deleted before auto-reply fired
+  }
+}
+
+export async function markDemoConversationRead(myUid: string, convId: string): Promise<void> {
+  try {
+    await updateDoc(doc(db, 'users', sanitizeId(myUid), 'demoConversations', sanitizeId(convId)), {
+      unreadCount: 0,
       updatedAt: serverTimestamp(),
     });
   } catch {
     // Non-fatal
   }
+}
+
+export async function toggleDemoConversationMute(
+  myUid: string,
+  convId: string,
+  muted: boolean
+): Promise<void> {
+  await updateDoc(doc(db, 'users', sanitizeId(myUid), 'demoConversations', sanitizeId(convId)), {
+    isMuted: muted,
+    updatedAt: serverTimestamp(),
+  });
+}
+
+export async function toggleDemoConversationArchive(
+  myUid: string,
+  convId: string,
+  archived: boolean
+): Promise<void> {
+  await updateDoc(doc(db, 'users', sanitizeId(myUid), 'demoConversations', sanitizeId(convId)), {
+    isArchived: archived,
+    updatedAt: serverTimestamp(),
+  });
+}
+
+export async function deleteDemoConversation(myUid: string, convId: string): Promise<void> {
+  const safeUid = sanitizeId(myUid);
+  const safeConv = sanitizeId(convId);
+  try {
+    const msgsSnap = await getDocs(
+      query(collection(db, 'users', safeUid, 'demoMessages'), where('conversationId', '==', safeConv))
+    );
+    const batch = writeBatch(db);
+    msgsSnap.docs.forEach((d) => batch.delete(d.ref));
+    batch.delete(doc(db, 'users', safeUid, 'demoConversations', safeConv));
+    await batch.commit();
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, `users/${safeUid}/demoConversations/${safeConv}`);
+  }
+}
+
+export async function toggleDemoMessageReaction(
+  myUid: string,
+  message: ChatMessage,
+  emoji: string
+): Promise<void> {
+  const safeUid = sanitizeId(myUid);
+  const currentForEmoji = (message.reactions || [])
+    .filter((r) => r.emoji === emoji)
+    .map((r) => r.userId);
+  const hasReacted = currentForEmoji.includes(safeUid);
+  const nextForEmoji = hasReacted
+    ? currentForEmoji.filter((u) => u !== safeUid)
+    : [...currentForEmoji, safeUid];
+
+  await updateDoc(doc(db, 'users', safeUid, 'demoMessages', message.id), {
+    [`reactions.${emoji}`]: nextForEmoji,
+  });
+}
+
+export async function deleteDemoMessage(myUid: string, messageId: string): Promise<void> {
+  await deleteDoc(doc(db, 'users', sanitizeId(myUid), 'demoMessages', sanitizeId(messageId)));
 }
 
 // --- Real-Time 1-to-1 Messenger Conversations ---
@@ -639,24 +1010,18 @@ function mapFirestoreConversation(
   blockedSet: Set<string>,
   directoryMap: Map<string, UserDirectoryEntry>
 ): Conversation | null {
+  if (Boolean(data.isDemo)) {
+    // Legacy shared demo threads from pre-isolation builds are superseded by users/{uid}/demoConversations
+    return null;
+  }
   const deletedForMap = (data.deletedFor as Record<string, boolean> | undefined) || {};
   if (deletedForMap[myUid] === true) {
     return null;
   }
 
-  const isDemo = Boolean(data.isDemo);
-  const demoShopKey =
-    data.demoShopKey === 'team' ||
-    data.demoShopKey === 'biryani' ||
-    data.demoShopKey === 'mishti' ||
-    data.demoShopKey === 'bakery'
-      ? data.demoShopKey
-      : null;
-  const demoSpec = demoShopKey ? DEMO_SHOPS.find((s) => s.key === demoShopKey) : undefined;
-
   const uidA = String(data.uidA ?? data.donorId ?? myUid);
   const uidB = String(data.uidB ?? data.recipientId ?? myUid);
-  const peerUid = isDemo ? uidB : uidA === myUid ? uidB : uidA;
+  const peerUid = uidA === myUid ? uidB : uidA;
 
   const profiles =
     (data.participantProfiles as Record<string, Record<string, unknown>> | undefined) || {};
@@ -664,7 +1029,6 @@ function mapFirestoreConversation(
   const liveDir = directoryMap.get(peerUid);
 
   const peerName =
-    demoSpec?.name ||
     liveDir?.restaurantName ||
     liveDir?.displayName ||
     (typeof peerMeta.restaurantName === 'string' && peerMeta.restaurantName) ||
@@ -674,37 +1038,23 @@ function mapFirestoreConversation(
       : String(data.recipientName ?? 'Community Member'));
 
   const peerAvatar =
-    demoSpec?.avatar ||
-    liveDir?.photoURL ||
-    (typeof peerMeta.photoURL === 'string' ? peerMeta.photoURL : null);
+    liveDir?.photoURL || (typeof peerMeta.photoURL === 'string' ? peerMeta.photoURL : null);
 
-  const peerRole = demoSpec
-    ? demoSpec.isOfficial
-      ? 'admin'
-      : 'donor'
-    : liveDir?.role || (typeof peerMeta.role === 'string' ? peerMeta.role : 'user');
-
-  const peerVerified = demoSpec
-    ? true
-    : liveDir?.verified ?? Boolean(peerMeta.verified);
-
-  const peerArea = demoSpec
-    ? demoSpec.area
-    : liveDir?.area || (typeof peerMeta.area === 'string' ? peerMeta.area : 'Dhaka');
-
-  const peerHandle = demoSpec
-    ? demoSpec.handle
-    : liveDir?.handle ||
-      (typeof peerMeta.handle === 'string'
-        ? peerMeta.handle
-        : generatePublicHandle(peerName, peerUid));
+  const peerRole = liveDir?.role || (typeof peerMeta.role === 'string' ? peerMeta.role : 'user');
+  const peerVerified = liveDir?.verified ?? Boolean(peerMeta.verified);
+  const peerArea = liveDir?.area || (typeof peerMeta.area === 'string' ? peerMeta.area : 'Dhaka');
+  const peerHandle =
+    liveDir?.handle ||
+    (typeof peerMeta.handle === 'string'
+      ? peerMeta.handle
+      : generatePublicHandle(peerName, peerUid));
 
   const unreadMap = (data.unreadCount as Record<string, number> | undefined) || {};
   const mutedMap = (data.mutedBy as Record<string, boolean> | undefined) || {};
   const archivedMap = (data.archivedBy as Record<string, boolean> | undefined) || {};
   const typingMap = (data.typingBy as Record<string, boolean> | undefined) || {};
 
-  const blockedByMe = !isDemo && blockedSet.has(peerUid);
+  const blockedByMe = blockedSet.has(peerUid);
   const lastMsgAt = timestampToIso(data.lastMessageAt ?? data.updatedAt);
 
   return {
@@ -716,14 +1066,14 @@ function mapFirestoreConversation(
     uidA,
     uidB,
     participants: Array.isArray(data.participants) ? (data.participants as string[]) : [uidA, uidB],
-    conversationKind: isDemo ? 'demo' : data.conversationKind === 'pickup' ? 'pickup' : 'direct',
+    conversationKind: data.conversationKind === 'pickup' ? 'pickup' : 'direct',
     donorRole: String(data.donorId ?? '') === peerUid ? peerRole : 'user',
     recipientRole: String(data.recipientId ?? '') === peerUid ? peerRole : 'user',
     donorName: String(data.donorId ?? '') === peerUid ? peerName : String(data.donorName ?? peerName),
     donorLogoUrl: peerAvatar,
     donorVerified: peerVerified,
     donorArea: peerArea,
-    donorHours: demoSpec?.hours ?? null,
+    donorHours: liveDir?.openingHours ?? null,
     recipientName:
       String(data.recipientId ?? '') === peerUid
         ? peerName
@@ -736,22 +1086,24 @@ function mapFirestoreConversation(
     peerRole,
     peerVerified,
     peerArea,
-    peerRestaurantName: liveDir?.restaurantName ?? demoSpec?.name ?? null,
-    peerOnline: isDemo ? true : Boolean(liveDir?.online),
-    peerLastSeen: isDemo ? null : liveDir?.lastSeen ?? null,
-    peerTyping: !isDemo && Boolean(typingMap[peerUid]),
-    listingTitle:
-      String(data.listingTitle ?? '') ||
-      (demoSpec ? `${demoSpec.area} · ${demoSpec.isOfficial ? 'Official' : 'Demo Partner'}` : peerHandle),
+    peerRestaurantName: liveDir?.restaurantName ?? null,
+    peerOnline: Boolean(liveDir?.online),
+    peerLastSeen: liveDir?.lastSeen ?? null,
+    peerTyping: Boolean(typingMap[peerUid]),
+    peerBio: liveDir?.bio ?? null,
+    peerBioBn: liveDir?.bioBn ?? null,
+    peerRating: liveDir?.rating ?? null,
+    peerReviewCount: liveDir?.reviewCount ?? null,
+    listingTitle: String(data.listingTitle ?? '') || peerHandle,
     listingPhoto: peerAvatar || FOOD_CATEGORY_IMAGES.cooked,
     pickupStart: lastMsgAt,
     pickupEnd: lastMsgAt,
     claimStatus: 'requested',
-    isDirect: !data.listingId || String(data.listingId).startsWith('direct_') || isDemo,
-    isStarter: isDemo,
-    isDemo,
-    demoShopKey,
-    isOfficial: Boolean(demoSpec?.isOfficial || peerMeta.isOfficial),
+    isDirect: !data.listingId || String(data.listingId).startsWith('direct_'),
+    isStarter: false,
+    isDemo: false,
+    demoShopKey: null,
+    isOfficial: Boolean(peerMeta.isOfficial),
     isMuted: Boolean(mutedMap[myUid]),
     isArchived: Boolean(archivedMap[myUid]),
     isFirestoreBacked: true,
@@ -976,6 +1328,30 @@ export async function openDirectChatForListingOrShop(
   listing?: Listing | null
 ): Promise<string> {
   const safeDonorId = sanitizeId(donorId);
+  if (safeDonorId.startsWith('demo_') || ALL_DEMO_PERSONAS_MAP.has(safeDonorId)) {
+    const known = ALL_DEMO_PERSONAS_MAP.get(safeDonorId);
+    const demoTarget: UserDirectoryEntry = {
+      uid: safeDonorId,
+      displayName: known?.displayName ?? donorName,
+      handle: known?.handle ?? generatePublicHandle(donorName, safeDonorId),
+      photoURL: known?.avatar ?? donorLogoUrl ?? null,
+      role: known?.role ?? 'restaurantOwner',
+      restaurantName: known?.restaurantName ?? donorName,
+      area: known?.area ?? donorArea,
+      verified: known?.verified ?? donorVerified,
+      discoverable: true,
+      online: known?.online ?? true,
+      lastSeen: new Date().toISOString(),
+      isDemo: true,
+      bio: known?.bio ?? null,
+      bioBn: known?.bioBn ?? null,
+      openingHours: known?.openingHours ?? null,
+      rating: known?.rating ?? null,
+      reviewCount: known?.reviewCount ?? null,
+    };
+    return getOrCreateDemoPersonaConversation(me, demoTarget);
+  }
+
   let target: UserDirectoryEntry | null = null;
   try {
     const snap = await getDoc(doc(db, 'userDirectory', safeDonorId));
@@ -986,17 +1362,18 @@ export async function openDirectChatForListingOrShop(
         displayName: String(d.displayName ?? donorName),
         handle: String(d.handle ?? generatePublicHandle(donorName, safeDonorId)),
         photoURL: typeof d.photoURL === 'string' ? d.photoURL : donorLogoUrl || null,
-        role:
-          d.role === 'restaurantOwner' || d.role === 'admin' || d.role === 'donor'
-            ? d.role
-            : 'restaurantOwner',
+        role: parseDirectoryRole(d.role || 'restaurantOwner'),
         restaurantName: typeof d.restaurantName === 'string' ? d.restaurantName : donorName,
         area: String(d.area ?? donorArea),
         verified: Boolean(d.verified),
         discoverable: Boolean(d.discoverable ?? true),
         online: Boolean(d.online),
         lastSeen: timestampToIso(d.lastSeen),
+        isDemo: Boolean(d.isDemo),
       };
+      if (target.isDemo) {
+        return getOrCreateDemoPersonaConversation(me, target);
+      }
     }
   } catch {
     // Fallback below if donor is a catalog shop not yet in userDirectory
@@ -1362,44 +1739,6 @@ export async function sendMessengerMessage(params: {
     await updateDoc(doc(db, 'conversations', convId), convUpdates);
   } catch (error) {
     handleFirestoreError(error, OperationType.UPDATE, `conversations/${convId}`);
-  }
-
-  // Deterministic auto-reply for Demo starter shops
-  if (params.conversation.isDemo && params.conversation.demoShopKey) {
-    const spec = DEMO_SHOPS.find((s) => s.key === params.conversation.demoShopKey);
-    if (spec) {
-      window.setTimeout(async () => {
-        const replyId = sanitizeId(`demo_ar_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`);
-        try {
-          await setDoc(doc(db, 'conversations', convId, 'messages', replyId), {
-            conversationId: convId,
-            participants,
-            senderId: spec.shopUid,
-            senderName: spec.name,
-            text: clampStr(spec.autoReply, 2000),
-            messageType: 'text',
-            deliveredTo: [myUid],
-            readBy: [],
-            deletedFor: [],
-            reactions: {},
-            status: 'delivered',
-            isDemoAutoReply: true,
-            createdAt: serverTimestamp(),
-          });
-          await updateDoc(doc(db, 'conversations', convId), {
-            lastMessage: clampStr(spec.autoReply, 500),
-            lastMessageType: 'text',
-            lastMessageSenderId: spec.shopUid,
-            lastMessageAt: serverTimestamp(),
-            [`unreadCount.${myUid}`]: increment(1),
-            updatedAt: serverTimestamp(),
-          });
-        } catch {
-          // Ignore if demo thread was deleted before timer elapsed
-        }
-      }, 650);
-    }
-    return;
   }
 
   // Notify real peer about new message / reply

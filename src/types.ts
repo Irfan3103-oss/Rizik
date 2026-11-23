@@ -131,12 +131,22 @@ export interface User {
   restaurant?: RestaurantInfo | null;
 }
 
+export type DirectoryRole =
+  | 'user'
+  | 'restaurantOwner'
+  | 'recipient'
+  | 'donor'
+  | 'admin'
+  | 'volunteer'
+  | 'ngo'
+  | 'organizer';
+
 export interface UserDirectoryEntry {
   uid: string;
   displayName: string;
   handle: string;
   photoURL?: string | null;
-  role: 'user' | 'restaurantOwner' | 'recipient' | 'donor' | 'admin';
+  role: DirectoryRole;
   restaurantName?: string | null;
   restaurantType?: string | null;
   area: string;
@@ -144,6 +154,12 @@ export interface UserDirectoryEntry {
   discoverable: boolean;
   online: boolean;
   lastSeen: string;
+  isDemo?: boolean;
+  bio?: string | null;
+  bioBn?: string | null;
+  openingHours?: string | null;
+  rating?: number | null;
+  reviewCount?: number | null;
 }
 
 export interface DonorProfile {
@@ -277,7 +293,12 @@ export interface Conversation {
   isDirect?: boolean;
   isStarter?: boolean;
   isDemo?: boolean;
-  demoShopKey?: 'team' | 'biryani' | 'mishti' | 'bakery' | null;
+  demoShopKey?: string | null;
+  demoPersonaId?: string | null;
+  peerBio?: string | null;
+  peerBioBn?: string | null;
+  peerRating?: number | null;
+  peerReviewCount?: number | null;
   isOfficial?: boolean;
   isMuted?: boolean;
   isArchived?: boolean;
@@ -712,4 +733,97 @@ export interface PlatformUserSummary {
   lastActiveAt?: string | null;
   lastSeen?: string | null;
 }
+
+export interface DemoPersonaSpec {
+  id: string;
+  displayName: string;
+  displayNameBn?: string;
+  handle: string;
+  role: DirectoryRole;
+  avatar?: string | null;
+  restaurantName?: string | null;
+  restaurantType?: RestaurantType | string | null;
+  area: string;
+  verified: boolean;
+  bio: string;
+  bioBn: string;
+  openingHours?: string | null;
+  rating?: number | null;
+  reviewCount?: number | null;
+  online: boolean;
+  isOfficial?: boolean;
+  categoryKey:
+    | 'team'
+    | 'biryani'
+    | 'mishti'
+    | 'bakery'
+    | 'kabab'
+    | 'tea'
+    | 'catering'
+    | 'hotel'
+    | 'volunteer'
+    | 'recipient'
+    | 'ngo'
+    | 'organizer';
+}
+
+export interface CommunityRoom {
+  id: string;
+  slug: string;
+  name: string;
+  nameBn: string;
+  description: string;
+  descriptionBn: string;
+  iconKey: 'community' | 'restaurant' | 'volunteer';
+  pinnedOrder: number;
+  memberCount: number;
+  onlineCount: number;
+  lastMessage: string;
+  lastMessageSenderName: string;
+  lastMessageAt: string;
+  mutedUids: string[];
+  isDemoSeeded?: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RoomMember {
+  uid: string;
+  displayName: string;
+  handle?: string | null;
+  photoURL?: string | null;
+  role: DirectoryRole;
+  area?: string | null;
+  online: boolean;
+  isDemo?: boolean;
+  lastMessageAt?: string | null;
+  updatedAt: string;
+}
+
+export interface RoomMessage {
+  id: string;
+  roomId: string;
+  senderId: string;
+  senderName: string;
+  senderHandle?: string | null;
+  senderAvatar?: string | null;
+  senderRole: DirectoryRole;
+  senderArea?: string | null;
+  senderVerified: boolean;
+  senderIsDemo: boolean;
+  text: string;
+  messageType: 'text' | 'image';
+  mediaUrl?: string | null;
+  replyToId?: string | null;
+  replyToText?: string | null;
+  replyToSenderName?: string | null;
+  reactions: Record<string, string[]>;
+  reportedBy?: string[];
+  deleted?: boolean;
+  isDemo?: boolean;
+  createdAt: string;
+  clientTempId?: string;
+  pending?: boolean;
+}
+
 

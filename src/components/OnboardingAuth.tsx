@@ -21,7 +21,7 @@ import {
 } from 'lucide-react';
 import { api } from '../lib/api';
 import { useAuth } from '../auth/AuthContext';
-import type { AccountType, AuthSession, RestaurantInfo, RestaurantType } from '../types';
+import type { AccountType, AuthSession, RestaurantInfo, RestaurantType, User } from '../types';
 import { compressImageFileToDataUrl } from '../lib/imageCompress';
 import { MapPinPicker } from './MapPinPicker';
 import { ThemePaletteButton } from './ThemePalettePopover';
@@ -511,9 +511,13 @@ export function OnboardingAuth({
             verified: true,
             language: lang,
             savedRadiusKm: 15,
+            createdAt: new Date().toISOString(),
             donorProfile: {
+              userId: 'donor_1',
               businessName: 'Saffron Kitchen',
               address: 'House 42, Road 27, Dhanmondi, Dhaka',
+              lat: 23.7465,
+              lng: 90.376,
               hours: '10:00 AM - 10:30 PM',
               verificationStatus: 'verified',
             },
@@ -525,12 +529,15 @@ export function OnboardingAuth({
               address: 'House 42, Road 27, Dhanmondi, Dhaka',
               city: 'Dhaka',
               area: 'Dhanmondi',
+              lat: 23.7465,
+              lng: 90.376,
               restaurantType: 'restaurant',
               tradeLicenseNumber: 'TR-DHN-88214',
               openingHours: '10:00 AM - 10:30 PM',
               approxDailySurplus: '15-25 meals',
               restaurantPhotoUrl: '/images/haji-biriyani-boxes.jpg',
-              verificationStatus: 'verified',
+              acceptedSafetyTerms: true,
+              verificationStatus: 'approved',
             },
           }
         : {
@@ -545,6 +552,7 @@ export function OnboardingAuth({
             verified: true,
             language: lang,
             savedRadiusKm: 10,
+            createdAt: new Date().toISOString(),
           };
 
       const fallbackSession: AuthSession = {

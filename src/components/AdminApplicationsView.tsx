@@ -5,7 +5,9 @@ import {
   Building2,
   CheckCircle2,
   Clock,
+  Database,
   FileCheck2,
+  Loader2,
   Lock,
   Mail,
   MapPin,
@@ -13,7 +15,9 @@ import {
   Phone,
   Search,
   ShieldAlert,
+  Sparkles,
   Store,
+  Trash2,
   User as UserIcon,
   XCircle,
 } from 'lucide-react';
@@ -22,6 +26,11 @@ import {
   ensureAdminConversationForOwner,
   reviewRestaurantApplication,
 } from '../lib/adminChatService';
+import {
+  removeAllDemoData,
+  seedAllDemoData,
+  type DemoSeedProgress,
+} from '../lib/communityRoomsService';
 import type {
   RestaurantOwnerApplication,
   RestaurantVerificationStatus,
@@ -35,6 +44,8 @@ interface AdminApplicationsViewProps {
   applications: RestaurantOwnerApplication[];
   selectedOwnerUid?: string | null;
   onSelectOwnerUid?: (uid: string | null) => void;
+  demoProfilesCount?: number;
+  communityRoomsCount?: number;
   onMessageOwner: (conversationId: string) => void;
   onGoBackHome: () => void;
 }
@@ -45,11 +56,19 @@ export function AdminApplicationsView({
   applications,
   selectedOwnerUid,
   onSelectOwnerUid,
+  demoProfilesCount = 0,
+  communityRoomsCount = 0,
   onMessageOwner,
   onGoBackHome,
 }: AdminApplicationsViewProps) {
   const { t, formatArea, formatNumber } = useI18n();
   const { isAdmin, firebaseUser } = useAuth();
+
+  const [demoBusy, setDemoBusy] = useState<'seed' | 'remove' | null>(null);
+  const [confirmRemoveDemo, setConfirmRemoveDemo] = useState(false);
+  const [demoProgress, setDemoProgress] = useState<DemoSeedProgress | null>(null);
+  const [demoToast, setDemoToast] = useState<string | null>(null);
+  const [demoError, setDemoError] = useState<string | null>(null);
 
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('pending');
   const [searchTerm, setSearchTerm] = useState('');
@@ -222,6 +241,53 @@ export function AdminApplicationsView({
     );
   };
 
+  const handleSeedDemoData = async () => {
+    if (!firebaseUser || demoBusy) return;
+    setDemoBusy('seed');
+    setConfirmRemoveDemo(false);
+    setDemoToast(null);
+    setDemoError(null);
+    setDemoProgress({ step: t('admin.demoSeedingStart'), current: 0, total: 1 });
+    try {
+      const summary = await seedAllDemoData(firebaseUser.uid, (p) => setDemoProgress(p));
+      setDemoToast(
+        t('admin.demoSeedSuccess', {
+          personas: formatNumber(summary.personasCount),
+          rooms: formatNumber(summary.roomsCount),
+          messages: formatNumber(summary.messagesWritten),
+        })
+      );
+    } catch (err) {
+      setDemoError(err instanceof Error ? err.message : t('donor.unableToUpdate'));
+    } finally {
+      setDemoBusy(null);
+      setDemoProgress(null);
+    }
+  };
+
+  const handleRemoveDemoData = async () => {
+    if (!firebaseUser || demoBusy) return;
+    setDemoBusy('remove');
+    setConfirmRemoveDemo(false);
+    setDemoToast(null);
+    setDemoError(null);
+    setDemoProgress({ step: t('admin.demoRemovingStart'), current: 0, total: 4 });
+    try {
+      const summary = await removeAllDemoData((p) => setDemoProgress(p));
+      setDemoToast(
+        t('admin.demoRemoveSuccess', {
+          personas: formatNumber(summary.deletedPersonas),
+          messages: formatNumber(summary.deletedMessages),
+        })
+      );
+    } catch (err) {
+      setDemoError(err instanceof Error ? err.message : t('donor.unableToUpdate'));
+    } finally {
+      setDemoBusy(null);
+      setDemoProgress(null);
+    }
+  };
+
   return (
     <div className="space-y-4">
       <PhotoLightbox
@@ -229,6 +295,113 @@ export function AdminApplicationsView({
         caption={lightboxSrc?.caption}
         onClose={() => setLightboxSrc(null)}
       />
+
+      {/* Admin Demo Personas & Community Rooms Seeding Card */}
+      <div className="bg-[var(--bg-surface)] rounded-2xl border border-[var(--border-subtle)] p-4 sm:p-5 space-y-3 shadow-xs">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="flex items-start gap-3 min-w-0">
+            <div className="w-10 h-10 rounded-xl bg-amber-100/80 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300 flex items-center justify-center shrink-0">
+              <Sparkles className="w-5 h-5" />
+            </div>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h2 className="font-display text-base sm:text-lg font-extrabold text-[var(--text-primary)]">
+                  {t('admin.demoCardTitle')}
+                </h2>
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[var(--bg-subtle)] border border-[var(--border-subtle)] text-[11px] font-semibold text-[var(--text-secondary)] tabular-nums">
+                  <Database className="w-3 h-3 text-[var(--brand-text)]" />
+                  {t('admin.demoStatusCounts', {
+                    personas: formatNumber(demoProfilesCount),
+                    rooms: formatNumber(communityRoomsCount),
+                  })}
+                </span>
+              </div>
+              <p className="text-xs text-[var(--text-muted)] mt-0.5 leading-relaxed">
+                {t('admin.demoCardDesc')}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <button
+              type="button"
+              disabled={Boolean(demoBusy)}
+              onClick={handleSeedDemoData}
+              className="min-h-[40px] px-4 py-2 rounded-xl bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] disabled:opacity-55 text-[var(--brand-primary-fg)] text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
+            >
+              {demoBusy === 'seed' ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Sparkles className="w-4 h-4" />
+              )}
+              <span>{t('admin.seedDemoBtn')}</span>
+            </button>
+
+            {!confirmRemoveDemo ? (
+              <button
+                type="button"
+                disabled={Boolean(demoBusy)}
+                onClick={() => setConfirmRemoveDemo(true)}
+                className="min-h-[40px] px-3.5 py-2 rounded-xl border border-red-200 dark:border-red-900/60 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/35 disabled:opacity-55 text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer"
+              >
+                <Trash2 className="w-4 h-4" />
+                <span>{t('admin.removeDemoBtn')}</span>
+              </button>
+            ) : (
+              <div className="flex items-center gap-1.5 bg-red-50 dark:bg-red-950/40 px-2.5 py-1 rounded-xl border border-red-200 dark:border-red-900/60">
+                <button
+                  type="button"
+                  disabled={Boolean(demoBusy)}
+                  onClick={handleRemoveDemoData}
+                  className="min-h-[30px] px-2.5 rounded-lg bg-red-600 hover:bg-red-700 text-white text-[11px] font-bold cursor-pointer"
+                >
+                  {t('admin.confirmRemoveDemoBtn')}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setConfirmRemoveDemo(false)}
+                  className="min-h-[30px] px-2 rounded-lg text-[11px] font-semibold text-[var(--text-secondary)] hover:bg-black/5 cursor-pointer"
+                >
+                  {t('common.cancel')}
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {demoProgress && (
+          <div className="space-y-1.5 pt-1">
+            <div className="flex items-center justify-between text-[11px] font-semibold text-[var(--text-secondary)]">
+              <span>{demoProgress.step}</span>
+              <span className="tabular-nums">
+                {formatNumber(demoProgress.current)} / {formatNumber(demoProgress.total)}
+              </span>
+            </div>
+            <div className="h-2 rounded-full bg-[var(--bg-subtle)] overflow-hidden">
+              <div
+                className="h-full bg-[var(--brand-primary)] transition-all duration-200"
+                style={{
+                  width: `${Math.min(
+                    100,
+                    Math.round((demoProgress.current / Math.max(1, demoProgress.total)) * 100)
+                  )}%`,
+                }}
+              />
+            </div>
+          </div>
+        )}
+
+        {demoToast && (
+          <p className="text-xs font-semibold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900/60 px-3 py-2 rounded-xl">
+            {demoToast}
+          </p>
+        )}
+        {demoError && (
+          <p className="text-xs font-semibold text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/60 px-3 py-2 rounded-xl">
+            {demoError}
+          </p>
+        )}
+      </div>
 
       {/* Header + Filter Bar */}
       <div className="bg-[var(--bg-surface)] rounded-2xl border border-[var(--border-subtle)] p-4 sm:p-5 space-y-4 shadow-xs">

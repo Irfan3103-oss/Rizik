@@ -68,7 +68,7 @@ async function doSeedStarterNotificationsOnce(fbUser: FirebaseUser): Promise<voi
   if (!userSnap.exists()) return;
   if (userSnap.data()?.notificationsSeeded === true) return;
 
-  const demoTeamConvId = sanitizeId(`demo_${uid}_team`);
+  const demoTeamConvId = 'demo_team';
   const starters = [
     {
       id: sanitizeId(`starter_welcome_${uid}`),

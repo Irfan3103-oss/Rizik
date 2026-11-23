@@ -127,6 +127,7 @@ export default defineConfig(() => {
       // HMR is disabled in AI Studio hosted preview so Vite does not attempt
       // an external HMR WebSocket connection that closes without opening.
       hmr: false,
+      allowedHosts: true,
       watch: process.env.DISABLE_HMR === 'true' ? null : {},
     },
   };

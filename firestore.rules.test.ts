@@ -1,7 +1,7 @@
 /**
- * Payload-First Security Verification Suite ("Dirty Dozen" + Messenger Security)
+ * Payload-First Security Verification Suite ("Dirty Dozen" + Community Rooms & Demo Isolation)
  * Validates document ID constraints, blueprint schema boundaries,
- * zero-PII user directory isolation, blocked-user gating, and notification integrity.
+ * zero-PII user directory isolation, blocked-user gating, room moderation, and notification integrity.
  */
 
 export interface SecurityCheckCase {
@@ -28,11 +28,11 @@ export const DIRTY_DOZEN_CASES: SecurityCheckCase[] = [
   },
   {
     id: 2,
-    name: 'Self-Assigned Verified or Admin Role on Directory Registration',
+    name: 'Self-Assigned Verified, Admin Role, or Demo Persona Flag by Non-Admin',
     collection: 'userDirectory',
     actorUid: 'user_attacker',
     actorEmailVerified: true,
-    payload: { uid: 'user_attacker', role: 'admin', verified: true },
+    payload: { uid: 'user_attacker', role: 'admin', verified: true, isDemo: true },
     expectedOutcome: 'PERMISSION_DENIED',
   },
   {
@@ -46,8 +46,8 @@ export const DIRTY_DOZEN_CASES: SecurityCheckCase[] = [
   },
   {
     id: 4,
-    name: 'Guest Read of UserDirectory or Cross-User Notification Read',
-    collection: 'userDirectory',
+    name: 'Guest Read of UserDirectory, Community Rooms, or Cross-User Demo Chats',
+    collection: 'rooms',
     actorUid: '',
     actorEmailVerified: false,
     payload: { action: 'list' },
@@ -64,11 +64,11 @@ export const DIRTY_DOZEN_CASES: SecurityCheckCase[] = [
   },
   {
     id: 6,
-    name: 'State Shortcutting Review on Uncompleted Claim',
-    collection: 'reviews',
-    actorUid: 'recip_1',
+    name: 'Non-Admin Seeding Demo Community Room Message',
+    collection: 'rooms/room_rizik_community/messages',
+    actorUid: 'user_attacker',
     actorEmailVerified: true,
-    payload: { claimId: 'claim_requested', rating: 5, claimStatus: 'requested' },
+    payload: { senderId: 'demo_persona_kacchi_sultan', senderIsDemo: true, isDemo: true },
     expectedOutcome: 'PERMISSION_DENIED',
   },
   {
@@ -100,8 +100,8 @@ export const DIRTY_DOZEN_CASES: SecurityCheckCase[] = [
   },
   {
     id: 10,
-    name: 'Oversized Chat Message (> 2000 chars)',
-    collection: 'conversations/direct_A_B/messages',
+    name: 'Oversized Chat or Community Room Message (> 2000 chars)',
+    collection: 'rooms/room_rizik_community/messages',
     actorUid: 'user_A',
     actorEmailVerified: true,
     payload: { senderId: 'user_A', textLength: 2500 },
@@ -109,16 +109,16 @@ export const DIRTY_DOZEN_CASES: SecurityCheckCase[] = [
   },
   {
     id: 11,
-    name: 'Unsolicited Cross-User Notification Spoof',
-    collection: 'users/user_victim/notifications',
+    name: 'Cross-User Isolated Demo Conversation Access',
+    collection: 'users/user_victim/demoConversations',
     actorUid: 'user_attacker',
     actorEmailVerified: true,
-    payload: { recipientUid: 'user_victim', senderUid: 'system', type: 'system' },
+    payload: { targetUserId: 'user_victim' },
     expectedOutcome: 'PERMISSION_DENIED',
   },
   {
     id: 12,
-    name: 'Blocked User Message Send or Editing Another User Message Text',
+    name: 'Blocked User Message Send or Muted User Room Post',
     collection: 'conversations/direct_A_B/messages',
     actorUid: 'user_B',
     actorEmailVerified: true,
@@ -131,9 +131,16 @@ export function evaluateInvariantGuard(testCase: SecurityCheckCase): 'PERMISSION
   const { id, actorUid, actorEmailVerified, payload } = testCase;
   if (!actorUid || !actorEmailVerified) return 'PERMISSION_DENIED';
   if (id === 1 && payload.donorId !== actorUid) return 'PERMISSION_DENIED';
-  if (id === 2 && (payload.verified === true || payload.role === 'admin')) return 'PERMISSION_DENIED';
+  if (
+    id === 2 &&
+    (payload.verified === true || payload.role === 'admin' || payload.isDemo === true)
+  ) {
+    return 'PERMISSION_DENIED';
+  }
   if (id === 3 && ('email' in payload || 'phone' in payload)) return 'PERMISSION_DENIED';
-  if (id === 6 && payload.claimStatus !== 'completed') return 'PERMISSION_DENIED';
+  if (id === 6 && (payload.senderIsDemo === true || payload.senderId !== actorUid)) {
+    return 'PERMISSION_DENIED';
+  }
   if (id === 7 && payload.previousStatus === 'completed') return 'PERMISSION_DENIED';
   if (id === 8 && Array.isArray(payload.participants) && payload.participants.length > 2) {
     return 'PERMISSION_DENIED';
@@ -144,7 +151,9 @@ export function evaluateInvariantGuard(testCase: SecurityCheckCase): 'PERMISSION
   if (id === 10 && typeof payload.textLength === 'number' && payload.textLength > 2000) {
     return 'PERMISSION_DENIED';
   }
-  if (id === 11 && payload.senderUid !== actorUid) return 'PERMISSION_DENIED';
-  if (id === 12 && (payload.blockedByPeer === true || 'editedText' in payload)) return 'PERMISSION_DENIED';
+  if (id === 11 && payload.targetUserId !== actorUid) return 'PERMISSION_DENIED';
+  if (id === 12 && (payload.blockedByPeer === true || 'editedText' in payload)) {
+    return 'PERMISSION_DENIED';
+  }
   return 'ALLOWED';
 }

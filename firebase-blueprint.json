@@ -171,7 +171,7 @@
         },
         "role": {
           "type": "string",
-          "enum": ["user", "restaurantOwner", "recipient", "donor", "admin"]
+          "enum": ["user", "restaurantOwner", "recipient", "donor", "admin", "volunteer", "ngo", "organizer"]
         },
         "restaurantName": {
           "type": "string",
@@ -194,6 +194,27 @@
         },
         "online": {
           "type": "boolean"
+        },
+        "isDemo": {
+          "type": "boolean"
+        },
+        "bio": {
+          "type": "string",
+          "maxLength": 400
+        },
+        "bioBn": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "openingHours": {
+          "type": "string",
+          "maxLength": 80
+        },
+        "rating": {
+          "type": "number"
+        },
+        "reviewCount": {
+          "type": "number"
         },
         "lastSeen": {
           "type": "string",
@@ -348,6 +369,8 @@
         "targetUserId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
         "targetName": { "type": "string", "minLength": 1, "maxLength": 120 },
         "conversationId": { "type": "string", "maxLength": 128 },
+        "roomId": { "type": "string", "maxLength": 128 },
+        "messageId": { "type": "string", "maxLength": 128 },
         "reason": { "type": "string", "minLength": 2, "maxLength": 120 },
         "details": { "type": "string", "maxLength": 1000 },
         "status": { "type": "string", "enum": ["open", "reviewed", "resolved"] },
@@ -614,6 +637,130 @@
         "conversationId", "ownerUid", "senderId", "senderRole", "senderName",
         "text", "messageType", "status", "createdAt"
       ]
+    },
+    "DemoConversation": {
+      "title": "DemoConversation",
+      "description": "Isolated client-side demo persona 1-to-1 thread stored strictly under users/{userId}/demoConversations.",
+      "type": "object",
+      "properties": {
+        "personaId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "personaName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "personaHandle": { "type": "string", "maxLength": 40 },
+        "personaRole": { "type": "string", "maxLength": 40 },
+        "personaArea": { "type": "string", "maxLength": 80 },
+        "personaAvatar": { "type": "string", "maxLength": 250000 },
+        "personaVerified": { "type": "boolean" },
+        "isOfficial": { "type": "boolean" },
+        "lastMessage": { "type": "string", "maxLength": 500 },
+        "lastMessageType": { "type": "string", "enum": ["text", "image", "file", "location", "audio", "call_log", "system"] },
+        "lastMessageSenderId": { "type": "string", "maxLength": 128 },
+        "lastMessageAt": { "type": "string", "format": "date-time" },
+        "unreadCount": { "type": "number" },
+        "isMuted": { "type": "boolean" },
+        "isArchived": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["personaId", "personaName", "lastMessage", "lastMessageType", "lastMessageAt", "unreadCount", "createdAt", "updatedAt"]
+    },
+    "DemoMessage": {
+      "title": "DemoMessage",
+      "description": "Message in an isolated demo persona thread stored strictly under users/{userId}/demoMessages.",
+      "type": "object",
+      "properties": {
+        "conversationId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "personaId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "senderId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "senderName": { "type": "string", "maxLength": 120 },
+        "text": { "type": "string", "maxLength": 2000 },
+        "messageType": { "type": "string", "enum": ["text", "image", "file", "location", "audio", "call_log", "system"] },
+        "mediaUrl": { "type": "string", "maxLength": 450000 },
+        "fileName": { "type": "string", "maxLength": 160 },
+        "fileSize": { "type": "number" },
+        "fileMime": { "type": "string", "maxLength": 100 },
+        "locationLat": { "type": "number" },
+        "locationLng": { "type": "number" },
+        "locationLabel": { "type": "string", "maxLength": 160 },
+        "locationExpiresAt": { "type": "string", "maxLength": 64 },
+        "durationSec": { "type": "number" },
+        "replyToId": { "type": "string", "maxLength": 128 },
+        "replyToText": { "type": "string", "maxLength": 200 },
+        "forwardedFrom": { "type": "string", "maxLength": 120 },
+        "reactions": { "type": "object" },
+        "isDemoAutoReply": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["conversationId", "personaId", "senderId", "text", "messageType", "createdAt"]
+    },
+    "ChatRoom": {
+      "title": "ChatRoom",
+      "description": "Public community group chat room pinned inside Messenger for verified signed-in users.",
+      "type": "object",
+      "properties": {
+        "slug": { "type": "string", "minLength": 2, "maxLength": 64 },
+        "name": { "type": "string", "minLength": 2, "maxLength": 100 },
+        "nameBn": { "type": "string", "minLength": 2, "maxLength": 120 },
+        "description": { "type": "string", "maxLength": 300 },
+        "descriptionBn": { "type": "string", "maxLength": 400 },
+        "iconKey": { "type": "string", "enum": ["community", "restaurant", "volunteer"] },
+        "pinnedOrder": { "type": "number" },
+        "memberCount": { "type": "number" },
+        "onlineCount": { "type": "number" },
+        "lastMessage": { "type": "string", "maxLength": 500 },
+        "lastMessageSenderName": { "type": "string", "maxLength": 120 },
+        "lastMessageAt": { "type": "string", "format": "date-time" },
+        "mutedUids": { "type": "array" },
+        "isDemoSeeded": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["slug", "name", "nameBn", "iconKey", "pinnedOrder", "memberCount", "onlineCount", "lastMessage", "lastMessageAt", "mutedUids", "createdAt", "updatedAt"]
+    },
+    "RoomMember": {
+      "title": "RoomMember",
+      "description": "Room presence and per-user rate limit record preventing spam inside community rooms.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "displayName": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "handle": { "type": "string", "maxLength": 40 },
+        "photoURL": { "type": "string", "maxLength": 250000 },
+        "role": { "type": "string", "maxLength": 40 },
+        "area": { "type": "string", "maxLength": 80 },
+        "online": { "type": "boolean" },
+        "isDemo": { "type": "boolean" },
+        "lastMessageAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "displayName", "role", "online", "updatedAt"]
+    },
+    "RoomMessage": {
+      "title": "RoomMessage",
+      "description": "Community room group chat message supporting replies, image attachments, reactions, and moderation.",
+      "type": "object",
+      "properties": {
+        "roomId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "senderId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "senderName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "senderHandle": { "type": "string", "maxLength": 40 },
+        "senderAvatar": { "type": "string", "maxLength": 250000 },
+        "senderRole": { "type": "string", "maxLength": 40 },
+        "senderArea": { "type": "string", "maxLength": 80 },
+        "senderVerified": { "type": "boolean" },
+        "senderIsDemo": { "type": "boolean" },
+        "text": { "type": "string", "maxLength": 2000 },
+        "messageType": { "type": "string", "enum": ["text", "image"] },
+        "mediaUrl": { "type": "string", "maxLength": 450000 },
+        "replyToId": { "type": "string", "maxLength": 128 },
+        "replyToText": { "type": "string", "maxLength": 200 },
+        "replyToSenderName": { "type": "string", "maxLength": 120 },
+        "reactions": { "type": "object" },
+        "reportedBy": { "type": "array" },
+        "deleted": { "type": "boolean" },
+        "isDemo": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["roomId", "senderId", "senderName", "senderRole", "senderVerified", "senderIsDemo", "text", "messageType", "createdAt"]
     }
   },
   "firestore": {
@@ -637,9 +784,29 @@
       "schema": { "$ref": "#/entities/UserNotification" },
       "description": "Per-user real-time notifications inbox including starter notifications."
     },
+    "/users/{userId}/demoConversations/{convId}": {
+      "schema": { "$ref": "#/entities/DemoConversation" },
+      "description": "Isolated per-user demo persona 1-to-1 conversations readable/writable only by userId."
+    },
+    "/users/{userId}/demoMessages/{msgId}": {
+      "schema": { "$ref": "#/entities/DemoMessage" },
+      "description": "Isolated per-user demo persona messages readable/writable only by userId."
+    },
     "/userDirectory/{userId}": {
       "schema": { "$ref": "#/entities/UserDirectoryProfile" },
       "description": "Zero-PII public user directory used by Find People & presence status."
+    },
+    "/rooms/{roomId}": {
+      "schema": { "$ref": "#/entities/ChatRoom" },
+      "description": "Community group chat rooms for signed-in users."
+    },
+    "/rooms/{roomId}/members/{memberId}": {
+      "schema": { "$ref": "#/entities/RoomMember" },
+      "description": "Room online presence and rate-limit state per user."
+    },
+    "/rooms/{roomId}/messages/{messageId}": {
+      "schema": { "$ref": "#/entities/RoomMessage" },
+      "description": "Community room real-time messages and reactions."
     },
     "/reports/{reportId}": {
       "schema": { "$ref": "#/entities/UserReport" },
@@ -679,7 +846,7 @@
     },
     "/conversations/{conversationId}": {
       "schema": { "$ref": "#/entities/ChatConversation" },
-      "description": "Messenger 1-to-1, pickup coordination, and starter demo conversations."
+      "description": "Messenger 1-to-1 and pickup coordination conversations."
     },
     "/conversations/{conversationId}/messages/{messageId}": {
       "schema": { "$ref": "#/entities/ChatMessage" },

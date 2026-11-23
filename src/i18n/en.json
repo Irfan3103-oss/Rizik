@@ -516,7 +516,18 @@
     "reportSubmitted": "Report submitted to our safety team.",
     "blockedConfirm": "Blocked {{name}}. You won't receive messages from them.",
     "unblockedNotice": "Unblocked {{name}}.",
-    "starterSeedDesc": "Official welcome guide & sample Bangladeshi partner kitchens"
+    "starterSeedDesc": "Official welcome guide & sample Bangladeshi partner kitchens",
+    "attachImage": "Attach photo",
+    "emojiPicker": "Pick emoji",
+    "loadOlder": "Load older messages",
+    "offlinePlaceholder": "Offline — reconnect to send message",
+    "phoneticToggle": "Phonetic Bangla (অভ্র)",
+    "react": "React to message",
+    "reply": "Reply",
+    "send": "Send",
+    "showConversations": "Show conversations",
+    "today": "Today",
+    "yesterday": "Yesterday"
   },
   "findPeople": {
     "title": "Find people",
@@ -540,6 +551,9 @@
     "privacyNote": "Only public handles & neighborhood areas are shown — emails and phones stay private.",
     "roleUser": "User",
     "roleRestaurant": "Restaurant Owner",
+    "roleVolunteer": "Volunteer",
+    "roleNgo": "NGO / Shelter",
+    "roleOrganizer": "Organizer",
     "roleAdmin": "Admin"
   },
   "shopProfile": {
@@ -1435,7 +1449,17 @@
     "notifResubmitted": "Application updated & resubmitted: {{restaurant}}",
     "notifNewMessage": "New message from {{restaurant}}",
     "adminAccountBadge": "Administrator account",
-    "openAdminAreaBtn": "Open Admin Area"
+    "openAdminAreaBtn": "Open Admin Area",
+    "demoCardTitle": "Demo Accounts & Rizik Community Rooms",
+    "demoCardDesc": "Seed or remove the 14 Bangladeshi sample personas and 3 pre-populated community rooms (Rizik Community, Restaurant Corner, Volunteers).",
+    "demoStatusCounts": "{{personas}} demo profiles · {{rooms}} rooms",
+    "seedDemoBtn": "Seed demo data",
+    "removeDemoBtn": "Remove all demo data",
+    "confirmRemoveDemoBtn": "Confirm remove",
+    "demoSeedingStart": "Preparing demo profiles and rooms...",
+    "demoRemovingStart": "Removing demo profiles and seeded messages...",
+    "demoSeedSuccess": "Seeded {{personas}} demo profiles, {{rooms}} community rooms, and {{messages}} new messages.",
+    "demoRemoveSuccess": "Removed {{personas}} demo profiles and {{messages}} seeded room messages."
   },
   "adminChat": {
     "teamName": "Rizik Team",
@@ -1475,5 +1499,36 @@
     },
     "ownerThreadsHeading": "Restaurant Owner Chats ({{count}})",
     "userThreadsHeading": "Admin & User Chats ({{count}})"
+  },
+  "demo": {
+    "badge": "Demo",
+    "tooltip": "Demo account for preview. Not a real person.",
+    "includeDemoChip": "Include demo accounts"
+  },
+  "rooms": {
+    "pinnedHeading": "Community Rooms",
+    "onlineLabel": "online",
+    "membersTitle": "Room Members ({{count}})",
+    "memberProfileTitle": "Member Profile",
+    "messageUserBtn": "Message",
+    "messageShort": "Message",
+    "guidelinesTitle": "Rizik Community Guidelines",
+    "guidelinesBody": "Be respectful, share verified food surplus details, protect personal phone numbers/addresses in public rooms, and never spam.",
+    "emptyMessages": "No messages in this room yet. Say hello!",
+    "removedByModerator": "[Message removed by moderator]",
+    "restoreMessage": "Restore",
+    "deleteMessage": "Remove message",
+    "muteUser": "Mute in room",
+    "unmuteUser": "Unmute",
+    "mutedBadge": "Muted",
+    "youAreMuted": "You have been muted in this room by a moderator.",
+    "reportMessage": "Report message",
+    "reportedToast": "Message reported to moderators. Thank you for keeping Rizik safe.",
+    "replyingTo": "Replying to {{name}}",
+    "composerPlaceholder": "Message #{{room}}...",
+    "errInvalidImage": "Please choose a valid image file.",
+    "errTooLong": "Message must be 2000 characters or fewer.",
+    "rateLimitHint": "Please wait a moment before sending another message.",
+    "sendFailed": "Could not send room message. Please try again."
   }
 }

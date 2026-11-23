@@ -42,6 +42,7 @@ import type {
   AuthSession,
   ChatMessage,
   Claim,
+  CommunityRoom,
   Conversation,
   DonationCause,
   HomeSummary,
@@ -50,6 +51,8 @@ import type {
   NotificationItem,
   PlatformUserSummary,
   RestaurantOwnerApplication,
+  RoomMember,
+  RoomMessage,
   UserDirectoryEntry,
 } from './types';
 import {
@@ -76,27 +79,49 @@ import {
   subscribeRestaurantApplications,
 } from './lib/adminChatService';
 import {
+  adminSetRoomMessageDeleted,
+  adminToggleMuteUserInRoom,
+  ensureRoomMemberPresence,
+  reportRoomMessage,
+  sendRoomMessage,
+  subscribeCommunityRooms,
+  subscribeRoomMembers,
+  subscribeRoomMessages,
+  toggleRoomMessageReaction,
+} from './lib/communityRoomsService';
+import {
   blockUserInFirestore,
   deleteConversationForMe,
+  deleteDemoConversation,
+  deleteDemoMessage,
   deleteMessageForMe,
   forwardMessengerMessage,
+  getOrCreateDemoPersonaConversation,
   getOrCreateDirectConversation,
   markConversationDeliveredAndRead,
   markConversationUnreadAsDelivered,
+  markDemoConversationRead,
   openDirectChatForListingOrShop,
   readOfflineMessageQueue,
   reportUserInFirestore,
   seedStarterDemoConversationsOnce,
+  sendDemoPersonaMessage,
   sendMessengerMessage,
   setMessengerTyping,
   subscribeConversationMessages,
+  subscribeDemoConversationMessages,
   subscribeDiscoverableDirectory,
   subscribeMyBlockedUsers,
+  subscribeMyDemoConversations,
   subscribeMyFirestoreConversations,
   syncUserDirectoryProfile,
   toggleConversationArchive,
   toggleConversationMute,
+  toggleDemoConversationArchive,
+  toggleDemoConversationMute,
+  toggleDemoMessageReaction,
   toggleMessengerReaction,
+  triggerDemoPersonaAutoReply,
   unblockUserInFirestore,
   uploadChatMediaFile,
   writeOfflineMessageQueue,
@@ -418,6 +443,14 @@ export default function App() {
   const [quota, setQuota] = useState({ usedToday: 0, dailyLimit: 3 });
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [firestoreConversations, setFirestoreConversations] = useState<Conversation[]>([]);
+  const [demoConversations, setDemoConversations] = useState<Conversation[]>([]);
+  const [communityRooms, setCommunityRooms] = useState<CommunityRoom[]>([]);
+  const [roomMessages, setRoomMessages] = useState<RoomMessage[]>([]);
+  const [roomMembers, setRoomMembers] = useState<RoomMember[]>([]);
+  const [roomMsgPageSize, setRoomMsgPageSize] = useState(30);
+  const [roomHasMore, setRoomHasMore] = useState(false);
+  const [loadingMoreRoom, setLoadingMoreRoom] = useState(false);
+  const [demoTypingByConv, setDemoTypingByConv] = useState<Record<string, boolean>>({});
   const [directoryEntries, setDirectoryEntries] = useState<UserDirectoryEntry[]>([]);
   const [directoryLimit, setDirectoryLimit] = useState(30);
   const [directoryHasMore, setDirectoryHasMore] = useState(false);
@@ -443,8 +476,12 @@ export default function App() {
   const blockedSetRef = useRef<Set<string>>(new Set());
   const seenNotifIdsRef = useRef<Set<string>>(new Set());
   const notifsInitializedRef = useRef(false);
+  const demoTypingTimersRef = useRef<Map<string, number>>(new Map());
   const langRef = useRef(lang);
   langRef.current = lang;
+  const activeTabRef = useRef(activeTab);
+  activeTabRef.current = activeTab;
+  const resolvedSelectedConvIdRef = useRef<string | null>(null);
 
   // Search, Filter & Discover Feed/Map mode state
   const [searchQuery, setSearchQuery] = useState('');
@@ -675,8 +712,15 @@ export default function App() {
   // Clear private data automatically whenever user becomes null (logout or 401 expiry)
   useEffect(() => {
     if (isLoggedIn) return;
+    demoTypingTimersRef.current.forEach((timerId) => window.clearTimeout(timerId));
+    demoTypingTimersRef.current.clear();
     setSelectedConvId(null);
     setConversations([]);
+    setDemoConversations([]);
+    setCommunityRooms([]);
+    setRoomMessages([]);
+    setRoomMembers([]);
+    setDemoTypingByConv({});
     setNotifications([]);
     setAdminNotifications([]);
     setAdminConversations([]);
@@ -831,6 +875,9 @@ export default function App() {
 
   const mergedConversations = useMemo(() => {
     const map = new Map<string, Conversation>();
+    for (const c of demoConversations) {
+      map.set(c.id, c);
+    }
     for (const c of enrichedFirestoreConversations) {
       map.set(c.id, c);
     }
@@ -842,7 +889,12 @@ export default function App() {
     return Array.from(map.values()).sort((a, b) =>
       (b.lastMessageAt || b.updatedAt).localeCompare(a.lastMessageAt || a.updatedAt)
     );
-  }, [enrichedFirestoreConversations, conversations]);
+  }, [demoConversations, enrichedFirestoreConversations, conversations]);
+
+  const mergedTypingByConv = useMemo(
+    () => ({ ...typingByConv, ...demoTypingByConv }),
+    [typingByConv, demoTypingByConv]
+  );
 
   const mergedNotifications = useMemo(() => {
     if (isFirebaseSession && isFirebaseVerified) {
@@ -851,10 +903,12 @@ export default function App() {
     return notifications;
   }, [isFirebaseSession, isFirebaseVerified, firestoreNotifications, notifications]);
 
-  // Resolve `/inbox/:shopId` param against admin_, conversation ID, peerUid, or donorId once conversations load
+  // Resolve `/inbox/:shopId` param against admin_, room_, conversation ID, peerUid, or donorId once conversations load
   const resolvedSelectedConvId = useMemo(() => {
     if (!selectedConvId) return null;
-    if (selectedConvId.startsWith('admin_')) return selectedConvId;
+    if (selectedConvId.startsWith('admin_') || selectedConvId.startsWith('room_')) {
+      return selectedConvId;
+    }
     const direct = mergedConversations.find((c) => c.id === selectedConvId);
     if (direct) return direct.id;
     const byPeerOrDonor = mergedConversations.find(
@@ -862,6 +916,7 @@ export default function App() {
     );
     return byPeerOrDonor ? byPeerOrDonor.id : selectedConvId;
   }, [mergedConversations, selectedConvId]);
+  resolvedSelectedConvIdRef.current = resolvedSelectedConvId;
 
   const loadHomeSummary = useCallback(async () => {
     try {
@@ -955,8 +1010,15 @@ export default function App() {
   // Attach Firestore real-time listeners ONLY when Firebase auth is ready and a user is signed in
   useEffect(() => {
     if (!(firebaseAuthReady && firebaseUser)) {
+      demoTypingTimersRef.current.forEach((timerId) => window.clearTimeout(timerId));
+      demoTypingTimersRef.current.clear();
       setFirestoreListings([]);
       setFirestoreConversations([]);
+      setDemoConversations([]);
+      setCommunityRooms([]);
+      setRoomMessages([]);
+      setRoomMembers([]);
+      setDemoTypingByConv({});
       setDirectoryEntries([]);
       setBlockedUids(new Set());
       setBlockedList([]);
@@ -1003,6 +1065,9 @@ export default function App() {
           setFirestoreConversations
         )
       );
+
+      unsubs.push(subscribeMyDemoConversations(firebaseUser.uid, setDemoConversations));
+      unsubs.push(subscribeCommunityRooms(setCommunityRooms));
 
       unsubs.push(
         subscribeUserNotifications(firebaseUser.uid, (items) => {
@@ -1071,11 +1136,57 @@ export default function App() {
     );
   }, [firebaseAuthReady, firebaseUser, isFirebaseVerified, directoryLimit]);
 
-  // Reset message page size when switching active thread
+  // Reset message page size when switching active thread or community room
   useEffect(() => {
     setMsgPageSize(30);
     setLoadingMoreMessages(false);
+    setRoomMsgPageSize(30);
+    setLoadingMoreRoom(false);
   }, [resolvedSelectedConvId]);
+
+  // Active Community Room messages, members & online presence subscription
+  useEffect(() => {
+    if (
+      !(
+        firebaseAuthReady &&
+        firebaseUser &&
+        isFirebaseVerified &&
+        user?.id === firebaseUser.uid &&
+        resolvedSelectedConvId?.startsWith('room_')
+      )
+    ) {
+      setRoomMessages([]);
+      setRoomMembers([]);
+      setRoomHasMore(false);
+      setLoadingMoreRoom(false);
+      return;
+    }
+
+    const unsubs: (() => void)[] = [];
+    unsubs.push(
+      subscribeRoomMessages(resolvedSelectedConvId, roomMsgPageSize, (msgs, hasMore) => {
+        setRoomMessages(msgs);
+        setRoomHasMore(hasMore);
+        setLoadingMoreRoom(false);
+      })
+    );
+    unsubs.push(subscribeRoomMembers(resolvedSelectedConvId, setRoomMembers));
+    void ensureRoomMemberPresence(resolvedSelectedConvId, user, isOnline);
+
+    return () => {
+      for (const unsub of unsubs) {
+        unsub();
+      }
+    };
+  }, [
+    firebaseAuthReady,
+    firebaseUser,
+    isFirebaseVerified,
+    user?.id,
+    resolvedSelectedConvId,
+    roomMsgPageSize,
+    isOnline,
+  ]);
 
   const activeFirestoreConv = useMemo(
     () =>
@@ -1085,13 +1196,28 @@ export default function App() {
     [mergedConversations, resolvedSelectedConvId]
   );
 
-  // Real-time paginated messages listener + delivered/read receipt syncing
+  // Real-time paginated messages listener + delivered/read receipt syncing (isolated for demo chats)
   useEffect(() => {
     if (!(firebaseAuthReady && firebaseUser && isFirebaseVerified && activeFirestoreConv)) {
       setFirestoreMessages([]);
       setHasMoreMessages(false);
       setLoadingMoreMessages(false);
       return;
+    }
+    if (activeFirestoreConv.isDemo) {
+      return subscribeDemoConversationMessages(
+        firebaseUser.uid,
+        activeFirestoreConv.id,
+        msgPageSize,
+        (msgs, hasMore) => {
+          setFirestoreMessages(msgs);
+          setHasMoreMessages(hasMore);
+          setLoadingMoreMessages(false);
+          if (activeTab === 'chat') {
+            void markDemoConversationRead(firebaseUser.uid, activeFirestoreConv.id);
+          }
+        }
+      );
     }
     return subscribeConversationMessages(
       activeFirestoreConv.id,
@@ -1115,6 +1241,7 @@ export default function App() {
     firebaseUser,
     isFirebaseVerified,
     activeFirestoreConv?.id,
+    activeFirestoreConv?.isDemo,
     activeFirestoreConv?.peerUid,
     msgPageSize,
     activeTab,
@@ -1697,7 +1824,10 @@ export default function App() {
       if (!user) return;
       if (isFirebaseSession && isFirebaseVerified) {
         try {
-          const convId = await getOrCreateDirectConversation(user, entry);
+          const isDemoTarget = Boolean(entry.isDemo || entry.uid.startsWith('demo_'));
+          const convId = isDemoTarget
+            ? await getOrCreateDemoPersonaConversation(user, entry, langRef.current)
+            : await getOrCreateDirectConversation(user, entry);
           navigateTo('chat', { convId });
         } catch (err) {
           const raw = err instanceof Error ? err.message : '';
@@ -1719,6 +1849,33 @@ export default function App() {
       navigateTo('chat', { convId: res.conversationId });
     },
     [user, isFirebaseSession, isFirebaseVerified, navigateTo, loadUserWorkspaceData, t]
+  );
+
+  const scheduleDemoAutoReply = useCallback(
+    (conv: Conversation, userText: string) => {
+      if (!user?.id || !conv.isDemo) return;
+      const existingTimer = demoTypingTimersRef.current.get(conv.id);
+      if (existingTimer) {
+        window.clearTimeout(existingTimer);
+      }
+      setDemoTypingByConv((prev) => ({ ...prev, [conv.id]: true }));
+      const delayMs = 1100 + Math.floor(Math.random() * 1400);
+      const timerId = window.setTimeout(() => {
+        demoTypingTimersRef.current.delete(conv.id);
+        setDemoTypingByConv((prev) => ({ ...prev, [conv.id]: false }));
+        const markUnread =
+          activeTabRef.current !== 'chat' || resolvedSelectedConvIdRef.current !== conv.id;
+        void triggerDemoPersonaAutoReply({
+          myUid: user.id,
+          conversation: conv,
+          userText,
+          lang: langRef.current,
+          markUnread,
+        });
+      }, delayMs);
+      demoTypingTimersRef.current.set(conv.id, timerId);
+    },
+    [user?.id]
   );
 
   const enqueueMessengerItem = useCallback(
@@ -1800,25 +1957,48 @@ export default function App() {
       }
 
       try {
-        await sendMessengerMessage({
-          conversation: conv,
-          senderId: tempItem.senderId,
-          senderName: tempItem.senderName,
-          text: tempItem.text,
-          messageType: tempItem.messageType,
-          mediaUrl: tempItem.mediaUrl,
-          fileName: tempItem.fileName,
-          fileSize: tempItem.fileSize,
-          fileMime: tempItem.fileMime,
-          durationSec: tempItem.durationSec,
-          locationLat: tempItem.locationLat,
-          locationLng: tempItem.locationLng,
-          locationLabel: tempItem.locationLabel,
-          locationExpiresAt: tempItem.locationExpiresAt,
-          replyToId: tempItem.replyToId,
-          replyToText: tempItem.replyToText,
-          forwardedFrom: tempItem.forwardedFrom,
-        });
+        if (conv.isDemo) {
+          const cleanText = await sendDemoPersonaMessage({
+            myUid: user.id,
+            myName: tempItem.senderName,
+            conversation: conv,
+            text: tempItem.text,
+            messageType: tempItem.messageType,
+            mediaUrl: tempItem.mediaUrl,
+            fileName: tempItem.fileName,
+            fileSize: tempItem.fileSize,
+            fileMime: tempItem.fileMime,
+            durationSec: tempItem.durationSec,
+            locationLat: tempItem.locationLat,
+            locationLng: tempItem.locationLng,
+            locationLabel: tempItem.locationLabel,
+            locationExpiresAt: tempItem.locationExpiresAt,
+            replyToId: tempItem.replyToId,
+            replyToText: tempItem.replyToText,
+            forwardedFrom: tempItem.forwardedFrom,
+          });
+          scheduleDemoAutoReply(conv, cleanText);
+        } else {
+          await sendMessengerMessage({
+            conversation: conv,
+            senderId: tempItem.senderId,
+            senderName: tempItem.senderName,
+            text: tempItem.text,
+            messageType: tempItem.messageType,
+            mediaUrl: tempItem.mediaUrl,
+            fileName: tempItem.fileName,
+            fileSize: tempItem.fileSize,
+            fileMime: tempItem.fileMime,
+            durationSec: tempItem.durationSec,
+            locationLat: tempItem.locationLat,
+            locationLng: tempItem.locationLng,
+            locationLabel: tempItem.locationLabel,
+            locationExpiresAt: tempItem.locationExpiresAt,
+            replyToId: tempItem.replyToId,
+            replyToText: tempItem.replyToText,
+            forwardedFrom: tempItem.forwardedFrom,
+          });
+        }
       } catch (err) {
         const msg = err instanceof Error ? err.message : '';
         if (msg.includes('permission-denied') || msg.includes('PERMISSION_DENIED')) {
@@ -1828,7 +2008,7 @@ export default function App() {
         throw err;
       }
     },
-    [user, isOnline, sendOrResolvePayloadMedia, enqueueMessengerItem, t]
+    [user, isOnline, sendOrResolvePayloadMedia, enqueueMessengerItem, scheduleDemoAutoReply, t]
   );
 
   const handleRetryQueuedMessage = useCallback(
@@ -1838,50 +2018,28 @@ export default function App() {
       const conv = item ? mergedConversations.find((c) => c.id === item.conversationId) : null;
       if (!item || !conv) return;
       try {
-        await sendMessengerMessage({
-          conversation: conv,
-          senderId: item.senderId,
-          senderName: item.senderName,
-          text: item.text,
-          messageType: item.messageType,
-          mediaUrl: item.mediaUrl,
-          fileName: item.fileName,
-          fileSize: item.fileSize,
-          fileMime: item.fileMime,
-          durationSec: item.durationSec,
-          locationLat: item.locationLat,
-          locationLng: item.locationLng,
-          locationLabel: item.locationLabel,
-          locationExpiresAt: item.locationExpiresAt,
-          replyToId: item.replyToId,
-          replyToText: item.replyToText,
-          forwardedFrom: item.forwardedFrom,
-        });
-        setQueuedMessengerMessages((prev) => {
-          const next = prev.filter((q) => q.tempId !== tempId);
-          writeOfflineMessageQueue(user.id, next);
-          return next;
-        });
-      } catch {
-        // Keep in queue for manual or next reconnect retry
-      }
-    },
-    [user, isOnline, queuedMessengerMessages, mergedConversations]
-  );
-
-  // Auto-flush queued Firestore messages when back online
-  useEffect(() => {
-    if (!isOnline || !isFirebaseVerified || !user?.id || queuedMessengerMessages.length === 0) return;
-    let cancelled = false;
-    void (async () => {
-      const remaining: QueuedMessengerMessage[] = [];
-      for (const item of queuedMessengerMessages) {
-        const conv = mergedConversations.find((c) => c.id === item.conversationId);
-        if (!conv) {
-          remaining.push(item);
-          continue;
-        }
-        try {
+        if (conv.isDemo) {
+          const cleanText = await sendDemoPersonaMessage({
+            myUid: user.id,
+            myName: item.senderName,
+            conversation: conv,
+            text: item.text,
+            messageType: item.messageType,
+            mediaUrl: item.mediaUrl,
+            fileName: item.fileName,
+            fileSize: item.fileSize,
+            fileMime: item.fileMime,
+            durationSec: item.durationSec,
+            locationLat: item.locationLat,
+            locationLng: item.locationLng,
+            locationLabel: item.locationLabel,
+            locationExpiresAt: item.locationExpiresAt,
+            replyToId: item.replyToId,
+            replyToText: item.replyToText,
+            forwardedFrom: item.forwardedFrom,
+          });
+          scheduleDemoAutoReply(conv, cleanText);
+        } else {
           await sendMessengerMessage({
             conversation: conv,
             senderId: item.senderId,
@@ -1901,6 +2059,74 @@ export default function App() {
             replyToText: item.replyToText,
             forwardedFrom: item.forwardedFrom,
           });
+        }
+        setQueuedMessengerMessages((prev) => {
+          const next = prev.filter((q) => q.tempId !== tempId);
+          writeOfflineMessageQueue(user.id, next);
+          return next;
+        });
+      } catch {
+        // Keep in queue for manual or next reconnect retry
+      }
+    },
+    [user, isOnline, queuedMessengerMessages, mergedConversations, scheduleDemoAutoReply]
+  );
+
+  // Auto-flush queued Firestore messages when back online
+  useEffect(() => {
+    if (!isOnline || !isFirebaseVerified || !user?.id || queuedMessengerMessages.length === 0) return;
+    let cancelled = false;
+    void (async () => {
+      const remaining: QueuedMessengerMessage[] = [];
+      for (const item of queuedMessengerMessages) {
+        const conv = mergedConversations.find((c) => c.id === item.conversationId);
+        if (!conv) {
+          remaining.push(item);
+          continue;
+        }
+        try {
+          if (conv.isDemo) {
+            const cleanText = await sendDemoPersonaMessage({
+              myUid: user.id,
+              myName: item.senderName,
+              conversation: conv,
+              text: item.text,
+              messageType: item.messageType,
+              mediaUrl: item.mediaUrl,
+              fileName: item.fileName,
+              fileSize: item.fileSize,
+              fileMime: item.fileMime,
+              durationSec: item.durationSec,
+              locationLat: item.locationLat,
+              locationLng: item.locationLng,
+              locationLabel: item.locationLabel,
+              locationExpiresAt: item.locationExpiresAt,
+              replyToId: item.replyToId,
+              replyToText: item.replyToText,
+              forwardedFrom: item.forwardedFrom,
+            });
+            scheduleDemoAutoReply(conv, cleanText);
+          } else {
+            await sendMessengerMessage({
+              conversation: conv,
+              senderId: item.senderId,
+              senderName: item.senderName,
+              text: item.text,
+              messageType: item.messageType,
+              mediaUrl: item.mediaUrl,
+              fileName: item.fileName,
+              fileSize: item.fileSize,
+              fileMime: item.fileMime,
+              durationSec: item.durationSec,
+              locationLat: item.locationLat,
+              locationLng: item.locationLng,
+              locationLabel: item.locationLabel,
+              locationExpiresAt: item.locationExpiresAt,
+              replyToId: item.replyToId,
+              replyToText: item.replyToText,
+              forwardedFrom: item.forwardedFrom,
+            });
+          }
         } catch {
           remaining.push(item);
         }
@@ -1913,7 +2139,14 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [isOnline, isFirebaseVerified, user?.id, queuedMessengerMessages.length, mergedConversations]);
+  }, [
+    isOnline,
+    isFirebaseVerified,
+    user?.id,
+    queuedMessengerMessages.length,
+    mergedConversations,
+    scheduleDemoAutoReply,
+  ]);
 
   const handleStartDirectChat = useCallback(
     async (targetUser: PlatformUserSummary) => {
@@ -3244,7 +3477,7 @@ export default function App() {
                 wsSocket={wsSocket}
                 wsStatus={wsStatus}
                 isOnline={isOnline}
-                typingByConv={typingByConv}
+                typingByConv={mergedTypingByConv}
                 isAdmin={isAdmin}
                 adminNotifications={adminNotifications}
                 adminConversations={adminConversations}
@@ -3272,35 +3505,74 @@ export default function App() {
                   }
                 }}
                 onReactFirestore={(conv, msg, emoji) =>
-                  toggleMessengerReaction(conv.id, msg, user.id, emoji)
+                  conv.isDemo
+                    ? toggleDemoMessageReaction(user.id, msg, emoji)
+                    : toggleMessengerReaction(conv.id, msg, user.id, emoji)
                 }
-                onDeleteMessageFirestore={(convId, msgId) =>
-                  deleteMessageForMe(convId, msgId, user.id)
-                }
-                onForwardFirestore={(targetConvs, msgs) => {
+                onDeleteMessageFirestore={(convId, msgId) => {
+                  const targetConv = mergedConversations.find((c) => c.id === convId);
+                  return targetConv?.isDemo || convId.startsWith('demo_')
+                    ? deleteDemoMessage(user.id, msgId)
+                    : deleteMessageForMe(convId, msgId, user.id);
+                }}
+                onForwardFirestore={async (targetConvs, msgs) => {
                   const senderName =
                     user.accountType === 'restaurantOwner'
                       ? user.restaurant?.restaurantName || user.donorProfile?.businessName || user.name
                       : user.name;
-                  return Promise.all(
-                    msgs.map((msg) =>
-                      forwardMessengerMessage({
-                        targets: targetConvs,
-                        sourceMessage: msg,
-                        senderId: user.id,
-                        senderName,
-                        forwardedFromLabel: msg.senderName || senderName,
+                  const realTargets = targetConvs.filter((tConv) => !tConv.isDemo);
+                  const demoTargets = targetConvs.filter((tConv) => Boolean(tConv.isDemo));
+                  await Promise.all([
+                    ...(realTargets.length > 0
+                      ? msgs.map((msg) =>
+                          forwardMessengerMessage({
+                            targets: realTargets,
+                            sourceMessage: msg,
+                            senderId: user.id,
+                            senderName,
+                            forwardedFromLabel: msg.senderName || senderName,
+                          })
+                        )
+                      : []),
+                    ...demoTargets.flatMap((tConv) =>
+                      msgs.map(async (msg) => {
+                        const cleanText = await sendDemoPersonaMessage({
+                          myUid: user.id,
+                          myName: senderName,
+                          conversation: tConv,
+                          text: msg.text,
+                          messageType: msg.messageType || 'text',
+                          mediaUrl: msg.imageUrl || msg.fileUrl || msg.audioUrl || null,
+                          fileName: msg.fileName ?? null,
+                          fileSize: msg.fileSize ?? null,
+                          fileMime: msg.fileMime ?? null,
+                          durationSec: msg.durationSec ?? null,
+                          locationLat: msg.locationLat ?? null,
+                          locationLng: msg.locationLng ?? null,
+                          locationLabel: msg.locationLabel ?? null,
+                          locationExpiresAt: msg.locationExpiresAt ?? null,
+                          forwardedFrom: msg.senderName || senderName,
+                        });
+                        scheduleDemoAutoReply(tConv, cleanText);
                       })
-                    )
-                  ).then(() => undefined);
+                    ),
+                  ]);
                 }}
                 onToggleMuteConv={(conv, muted) =>
-                  toggleConversationMute(conv.id, user.id, muted)
+                  conv.isDemo
+                    ? toggleDemoConversationMute(user.id, conv.id, muted)
+                    : toggleConversationMute(conv.id, user.id, muted)
                 }
                 onToggleArchiveConv={(conv, archived) =>
-                  toggleConversationArchive(conv.id, user.id, archived)
+                  conv.isDemo
+                    ? toggleDemoConversationArchive(user.id, conv.id, archived)
+                    : toggleConversationArchive(conv.id, user.id, archived)
                 }
-                onDeleteConvForMe={(conv) => deleteConversationForMe(conv, user.id)}
+                onDeleteConvForMe={(conv) =>
+                  conv.isDemo
+                    ? deleteDemoConversation(user.id, conv.id)
+                    : deleteConversationForMe(conv, user.id)
+                }
                 onToggleBlockPeer={(peerUid, peerName, peerHandle, currentlyBlocked) =>
                   currentlyBlocked
                     ? unblockUserInFirestore(user.id, peerUid)
@@ -3317,6 +3589,34 @@ export default function App() {
                   })
                 }
                 onStartDirectChat={user ? handleStartDirectChat : undefined}
+                communityRooms={isFirebaseSession && isFirebaseVerified ? communityRooms : []}
+                roomMessages={roomMessages}
+                roomMembers={roomMembers}
+                roomHasMore={roomHasMore}
+                loadingMoreRoom={loadingMoreRoom}
+                onLoadOlderRoomMessages={() => {
+                  if (loadingMoreRoom) return;
+                  setLoadingMoreRoom(true);
+                  setRoomMsgPageSize((n) => n + 30);
+                }}
+                onSendRoomMessage={(room, params) => sendRoomMessage({ room, user, ...params })}
+                onReactRoomMessage={(roomId, msg, emoji) =>
+                  toggleRoomMessageReaction(roomId, msg, user.id, emoji)
+                }
+                onReportRoomMessage={(roomId, msg, reason) =>
+                  reportRoomMessage({
+                    roomId,
+                    message: msg,
+                    reporterUid: user.id,
+                    reason,
+                  })
+                }
+                onAdminSetRoomMessageDeleted={(roomId, msg, deleted) =>
+                  adminSetRoomMessageDeleted(roomId, msg.id, deleted)
+                }
+                onAdminToggleMuteRoomUser={(roomId, targetUid, mute) =>
+                  adminToggleMuteUserInRoom(roomId, targetUid, mute)
+                }
                 onReviewApplication={(ownerUid) => {
                   setSelectedAdminOwnerUid(ownerUid);
                   navigateTo('admin');
@@ -3346,6 +3646,8 @@ export default function App() {
               applications={restaurantApplications}
               selectedOwnerUid={selectedAdminOwnerUid}
               onSelectOwnerUid={setSelectedAdminOwnerUid}
+              demoProfilesCount={directoryEntries.filter((e) => e.isDemo).length}
+              communityRoomsCount={communityRooms.length}
               onMessageOwner={(conversationId) =>
                 navigateTo('chat', { convId: conversationId })
               }

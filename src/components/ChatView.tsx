@@ -14,6 +14,7 @@ import {
   Copy,
   Flag,
   Forward,
+  HeartHandshake,
   Image as ImageIcon,
   Languages,
   Loader2,
@@ -54,10 +55,13 @@ import type {
   CallKind,
   ChatMessage,
   Claim,
+  CommunityRoom,
   Conversation,
   MessageReaction,
   MessageType,
   PlatformUserSummary,
+  RoomMember,
+  RoomMessage,
   User,
   UserDirectoryEntry,
 } from '../types';
@@ -69,6 +73,8 @@ import {
 } from '../lib/api';
 import type { QueuedMessengerMessage } from '../lib/messengerService';
 import { AdminChatThread } from './AdminChatThread';
+import { CommunityRoomView } from './CommunityRoomView';
+import { DemoBadge } from './DemoBadge';
 import { FindPeopleModal } from './FindPeopleModal';
 import { FoodImage } from './FoodImage';
 import { ShopAvatar } from './ShopAvatar';
@@ -165,6 +171,33 @@ interface ChatViewProps {
     details?: string
   ) => Promise<void>;
   onStartDirectChat?: (targetUser: PlatformUserSummary) => Promise<void>;
+  communityRooms?: CommunityRoom[];
+  roomMessages?: RoomMessage[];
+  roomMembers?: RoomMember[];
+  roomHasMore?: boolean;
+  loadingMoreRoom?: boolean;
+  onLoadOlderRoomMessages?: () => void;
+  onSendRoomMessage?: (
+    room: CommunityRoom,
+    params: {
+      text: string;
+      file?: Blob | null;
+      mediaUrlFallback?: string | null;
+      replyTo?: RoomMessage | null;
+    }
+  ) => Promise<void>;
+  onReactRoomMessage?: (roomId: string, msg: RoomMessage, emoji: string) => Promise<void>;
+  onReportRoomMessage?: (roomId: string, msg: RoomMessage, reason: string) => Promise<void>;
+  onAdminSetRoomMessageDeleted?: (
+    roomId: string,
+    msg: RoomMessage,
+    deleted: boolean
+  ) => Promise<void>;
+  onAdminToggleMuteRoomUser?: (
+    roomId: string,
+    targetUid: string,
+    mute: boolean
+  ) => Promise<void>;
   onReviewApplication?: (ownerUid: string) => void;
   onMarkAdminNotificationRead?: (notifId: string) => void;
   onMarkAllAdminNotificationsRead?: () => void;
@@ -237,6 +270,17 @@ export function ChatView({
   onToggleBlockPeer,
   onReportPeer,
   onStartDirectChat,
+  communityRooms = [],
+  roomMessages = [],
+  roomMembers = [],
+  roomHasMore = false,
+  loadingMoreRoom = false,
+  onLoadOlderRoomMessages,
+  onSendRoomMessage,
+  onReactRoomMessage,
+  onReportRoomMessage,
+  onAdminSetRoomMessageDeleted,
+  onAdminToggleMuteRoomUser,
   onReviewApplication,
   onMarkAdminNotificationRead,
   onMarkAllAdminNotificationsRead,
@@ -333,9 +377,17 @@ export function ChatView({
   const signaling = useMemo(() => createWebSocketSignalingAdapter(wsSocket), [wsSocket]);
 
   const isAdminConvSelected = Boolean(selectedConversationId?.startsWith('admin_'));
-  const activeConv = isAdminConvSelected
-    ? null
-    : (conversations.find((c) => c.id === selectedConversationId) ?? null);
+  const activeRoom = useMemo(
+    () =>
+      selectedConversationId?.startsWith('room_')
+        ? communityRooms.find((r) => r.id === selectedConversationId) ?? null
+        : null,
+    [selectedConversationId, communityRooms]
+  );
+  const activeConv =
+    isAdminConvSelected || activeRoom
+      ? null
+      : (conversations.find((c) => c.id === selectedConversationId) ?? null);
 
   const pinnedOwnerConv = useMemo<AdminConversation | null>(() => {
     if (isAdmin) return null;
@@ -465,7 +517,7 @@ export function ChatView({
     [onSelectDirectoryPerson, onStartDirectChat]
   );
 
-  const hasSelectedThread = Boolean(activeConv || activeAdminConv);
+  const hasSelectedThread = Boolean(activeConv || activeAdminConv || activeRoom);
 
   const activePrefs = useMemo(
     () => (activeConv ? getChatPrefs(activeConv.id) : getChatPrefs('__default__')),
@@ -675,6 +727,19 @@ export function ChatView({
     });
   }, [conversations, inboxFilter, inboxSearch, prefsVersion]);
 
+  const filteredRooms = useMemo(() => {
+    if (inboxFilter !== 'all') return [];
+    const q = inboxSearch.trim().toLowerCase();
+    if (!q) return communityRooms;
+    return communityRooms.filter(
+      (r) =>
+        r.name.toLowerCase().includes(q) ||
+        r.nameBn.toLowerCase().includes(q) ||
+        r.description.toLowerCase().includes(q) ||
+        r.lastMessage.toLowerCase().includes(q)
+    );
+  }, [communityRooms, inboxFilter, inboxSearch]);
+
   const directRealConvs = filteredConversations.filter((c) => !c.isDemo && c.isDirect);
   const activeConvs = filteredConversations.filter(
     (c) => !c.isDemo && !c.isDirect && ['requested', 'accepted', 'picked_up'].includes(c.claimStatus)
@@ -684,11 +749,12 @@ export function ChatView({
   );
   const demoConvs = filteredConversations.filter((c) => c.isDemo);
 
-  // Fetch messages when selected Express claim conversation changes (never for admin_ or Firestore threads)
+  // Fetch messages when selected Express claim conversation changes (never for admin_, room_, or Firestore threads)
   useEffect(() => {
     if (
       !selectedConversationId ||
       selectedConversationId.startsWith('admin_') ||
+      selectedConversationId.startsWith('room_') ||
       activeConv?.isFirestoreBacked
     ) {
       setMessages([]);
@@ -1773,11 +1839,7 @@ export function ChatView({
                   {t('adminChat.officialBadge')}
                 </span>
               )}
-              {conv.isDemo && (
-                <span className="px-1.5 py-0.5 rounded-md bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 text-[9px] font-bold shrink-0">
-                  {t('chat.demoTag')}
-                </span>
-              )}
+              {conv.isDemo && <DemoBadge compact />}
               {isMuted && (
                 <BellOff
                   className="w-3 h-3 text-[var(--text-muted)] shrink-0"
@@ -2237,9 +2299,73 @@ export function ChatView({
             </div>
           )}
 
+          {/* Pinned Rizik Community Rooms */}
+          {filteredRooms.length > 0 && (
+            <div className="border-b border-[var(--border-subtle)]">
+              <p className="px-4 py-2 text-[11px] font-bold text-[var(--brand-text)] bg-[var(--brand-soft)]/45 flex items-center justify-between gap-2">
+                <span className="inline-flex items-center gap-1.5">
+                  <Users className="w-3.5 h-3.5 shrink-0" />
+                  {t('rooms.pinnedHeading')}
+                </span>
+                <span className="text-[10px] font-semibold text-[var(--text-muted)] tabular-nums">
+                  {formatNumber(filteredRooms.length)}
+                </span>
+              </p>
+              {filteredRooms.map((room) => {
+                const selected = room.id === selectedConversationId;
+                const roomName = lang === 'bn' ? room.nameBn || room.name : room.name;
+                return (
+                  <button
+                    key={room.id}
+                    type="button"
+                    onClick={() => onSelectConversation(room.id)}
+                    className={`w-full p-3.5 flex items-center gap-3 text-left border-b border-[var(--border-subtle)] last:border-b-0 transition-colors cursor-pointer ${
+                      selected ? 'bg-[var(--brand-soft)]' : 'hover:bg-[var(--bg-subtle)]'
+                    }`}
+                  >
+                    <div className="w-11 h-11 rounded-2xl bg-[var(--brand-soft)] text-[var(--brand-text)] border border-[var(--brand-primary)]/20 flex items-center justify-center shrink-0">
+                      {room.iconKey === 'restaurant' ? (
+                        <Store className="w-5 h-5" />
+                      ) : room.iconKey === 'volunteer' ? (
+                        <HeartHandshake className="w-5 h-5" />
+                      ) : (
+                        <Users className="w-5 h-5" />
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <p className="text-sm font-bold text-[var(--text-primary)] truncate">
+                            {roomName}
+                          </p>
+                          <span className="px-1.5 py-0.5 rounded-md bg-[var(--bg-subtle)] border border-[var(--border-subtle)] text-[9px] font-bold text-[var(--text-secondary)] tabular-nums shrink-0">
+                            {formatNumber(room.memberCount)}
+                          </span>
+                        </div>
+                        {room.lastMessageAt && (
+                          <span className="text-[11px] text-[var(--text-muted)] tabular-nums shrink-0">
+                            {formatTime(room.lastMessageAt)}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 tabular-nums">
+                        {formatNumber(room.onlineCount)} {t('rooms.onlineLabel')}
+                      </p>
+                      <p className="text-xs text-[var(--text-muted)] truncate mt-0.5">
+                        {room.lastMessageSenderName ? `${room.lastMessageSenderName}: ` : ''}
+                        {room.lastMessage}
+                      </p>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
           {totalThreadsCount === 0 &&
           archivedConvs.length === 0 &&
-          filteredAdminNotifications.length === 0 ? (
+          filteredAdminNotifications.length === 0 &&
+          filteredRooms.length === 0 ? (
             <div className="p-8 text-center space-y-2">
               <MessageSquare className="w-8 h-8 text-[var(--text-muted)] opacity-50 mx-auto" />
               <p className="text-sm font-semibold text-[var(--text-primary)]">
@@ -2250,7 +2376,8 @@ export function ChatView({
           ) : filteredConversations.length === 0 &&
             filteredAdminConvs.length === 0 &&
             !showPinnedOwnerConv &&
-            filteredAdminNotifications.length === 0 ? (
+            filteredAdminNotifications.length === 0 &&
+            filteredRooms.length === 0 ? (
             <div className="p-8 text-center space-y-2">
               <Search className="w-7 h-7 text-[var(--text-muted)] opacity-50 mx-auto" />
               <p className="text-xs font-semibold text-[var(--text-secondary)]">
@@ -2315,6 +2442,77 @@ export function ChatView({
               onSelectConversation(null);
             }}
             onReviewApplication={isAdmin ? onReviewApplication : undefined}
+          />
+        ) : activeRoom ? (
+          <CommunityRoomView
+            room={activeRoom}
+            user={user}
+            isAdmin={Boolean(isAdmin)}
+            isOnline={isOnline}
+            messages={roomMessages}
+            members={roomMembers}
+            hasMoreMessages={roomHasMore}
+            loadingMoreMessages={loadingMoreRoom}
+            blockedUids={blockedUids}
+            directoryEntries={zeroPiiDirectory}
+            sidebarOpenOnDesktop={!inboxHiddenOnDesktop}
+            onShowSidebarDesktop={() => setInboxHiddenOnDesktop(false)}
+            onBackMobile={() => {
+              setInboxHiddenOnDesktop(false);
+              onSelectConversation(null);
+            }}
+            onLoadOlderMessages={() => onLoadOlderRoomMessages?.()}
+            onSendMessage={async (payload) => {
+              if (onSendRoomMessage) {
+                await onSendRoomMessage(activeRoom, payload);
+              }
+            }}
+            onReactMessage={async (msg, emoji) => {
+              if (onReactRoomMessage) {
+                await onReactRoomMessage(activeRoom.id, msg, emoji);
+              }
+            }}
+            onReportMessage={async (msg, reason) => {
+              if (onReportRoomMessage) {
+                await onReportRoomMessage(activeRoom.id, msg, reason);
+              }
+            }}
+            onAdminSetDeleted={async (msg, deleted) => {
+              if (onAdminSetRoomMessageDeleted) {
+                await onAdminSetRoomMessageDeleted(activeRoom.id, msg, deleted);
+              }
+            }}
+            onAdminToggleMute={async (targetUid, mute) => {
+              if (onAdminToggleMuteRoomUser) {
+                await onAdminToggleMuteRoomUser(activeRoom.id, targetUid, mute);
+              }
+            }}
+            onStartDirectChat={handleOpenPerson}
+            onToggleBlock={
+              onToggleBlockPeer
+                ? async (entry) => {
+                    const currentlyBlocked = blockedUids?.has(entry.uid) ?? false;
+                    await onToggleBlockPeer(
+                      entry.uid,
+                      entry.displayName,
+                      entry.handle,
+                      currentlyBlocked
+                    );
+                  }
+                : undefined
+            }
+            onReportUser={
+              onReportPeer
+                ? async (entry) => {
+                    await onReportPeer(
+                      entry.uid,
+                      entry.displayName,
+                      activeRoom.id,
+                      'Reported from community room'
+                    );
+                  }
+                : undefined
+            }
           />
         ) : !activeConv ? (
           <div className="flex-1 flex flex-col items-center justify-center p-8 text-center space-y-2 text-[var(--text-muted)]">
@@ -2381,11 +2579,7 @@ export function ChatView({
                           {t('adminChat.officialBadge')}
                         </span>
                       )}
-                      {activeConv.isDemo && (
-                        <span className="px-1.5 py-0.5 rounded-md bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 text-[10px] font-bold shrink-0">
-                          {t('chat.demoTag')}
-                        </span>
-                      )}
+                      {activeConv.isDemo && <DemoBadge compact />}
                       {activeIsMuted && (
                         <BellOff
                           className="w-3.5 h-3.5 text-[var(--text-muted)] shrink-0"
@@ -3337,6 +3531,18 @@ export function ChatView({
                     </div>
                   );
                 })
+              )}
+              {(activeConv.peerTyping || typingByConv[activeConv.id]) && (
+                <div className="flex justify-start">
+                  <div className="px-3.5 py-2 rounded-2xl rounded-bl-sm bg-[var(--bg-surface)] border border-[var(--border-subtle)] text-xs font-semibold text-[var(--text-muted)] inline-flex items-center gap-1.5 shadow-2xs">
+                    <span className="flex items-center gap-0.5" aria-hidden="true">
+                      <span className="w-1.5 h-1.5 rounded-full bg-[var(--brand-primary)] animate-bounce" />
+                      <span className="w-1.5 h-1.5 rounded-full bg-[var(--brand-primary)] animate-bounce [animation-delay:120ms]" />
+                      <span className="w-1.5 h-1.5 rounded-full bg-[var(--brand-primary)] animate-bounce [animation-delay:240ms]" />
+                    </span>
+                    <span>{t('chat.typing')}</span>
+                  </div>
+                </div>
               )}
               <div ref={bottomRef} />
             </div>

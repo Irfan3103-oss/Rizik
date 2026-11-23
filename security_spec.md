@@ -1,31 +1,37 @@
-# Security Specification — Ahar For All Firestore Rules
+# Security Specification — Rizik Firestore Rules
 
 ## 1. Data Invariants
-1. **Identity Integrity:** Every created user profile, user directory entry, private PII document, block record, report, listing, claim, review, donation, shift signup, and chat message must bind its owner/author ID (`uid`, `blockerUid`, `reporterId`, `donorId`, `recipientId`, `reviewerId`, `userId`, `senderId`) strictly to `request.auth.uid` (except explicit `isDemoAutoReply` messages strictly inside a user's own `isDemo == true` conversation).
-2. **Email Verification Gate:** All standard authenticated reads of private data, directory entries, chats, notifications, and all writes require `request.auth.token.email_verified == true`. Guests cannot read any chat, notification, or user directory data.
-3. **Zero Self-Assigned Privilege:** Users can only register with `role` in `['user', 'restaurantOwner', 'recipient', 'donor']`, `verified == false`, and (for `restaurantOwner`) `restaurant.verificationStatus == 'pending'`. Users cannot edit their own `role`, `verified`, or self-approve `verificationStatus`. Admin role can only come from Firebase custom claim (`admin: true`), Console-only `/admins/{uid}`, or the designated bootstrap admin email (explicitly excluding `sheikhsahel513@gmail.com`).
+1. **Identity Integrity:** Every created user profile, user directory entry, private PII document, block record, report, listing, claim, review, donation, shift signup, real 1-to-1 chat message, and real community room message must bind its owner/author ID (`uid`, `blockerUid`, `reporterId`, `donorId`, `recipientId`, `reviewerId`, `userId`, `senderId`) strictly to `request.auth.uid`.
+2. **Email Verification Gate:** All authenticated reads of private data, directory entries, community rooms, chats, notifications, and all writes require `request.auth.token.email_verified == true`. Guests cannot read or write any chat, community room, notification, or user directory data.
+3. **Zero Self-Assigned Privilege & Admin-Only Demo Seeding:**
+   - Users can only register with `role` in `['user', 'restaurantOwner', 'recipient', 'donor']`, `verified == false`, and (for `restaurantOwner`) `restaurant.verificationStatus == 'pending'`.
+   - Non-admin users cannot edit their `role`, `verified`, `isDemo`, or self-approve `verificationStatus`.
+   - Only `isAdmin()` may create/update/delete `userDirectory` documents with `isDemo == true`, create/delete `/rooms/{roomId}`, or write seeded `isDemo == true` messages into `/rooms/{roomId}/messages`.
+   - Admin role can only come from Firebase custom claim (`admin: true`), Console-only `/admins/{uid}`, or the designated bootstrap admin email (explicitly excluding `sheikhsahel513@gmail.com`).
 4. **PII Isolation & Zero-PII Directory:**
    - `email`, `phone`, and `address` in `/users/{userId}/private/info` are readable/writable only by `userId == request.auth.uid` or a verified admin.
-   - `/userDirectory/{userId}` strictly forbids PII fields (`email`, `phone`, `address`, license numbers) via `keys().hasOnly(...)` and exposes only public display fields (`displayName`, `@handle`, `photoURL`, `role`, `restaurantName`, `area`, `verified`, `discoverable`, `online`, `lastSeen`). Users who set `discoverable == false` cannot be read or listed by other users.
-5. **Relational, Master Gate & Bidirectional Block Integrity:**
+   - `/userDirectory/{userId}` strictly forbids PII fields (`email`, `phone`, `address`, license numbers) via `keys().hasOnly(...)` and exposes only public display/persona fields (`displayName`, `@handle`, `photoURL`, `role`, `restaurantName`, `area`, `verified`, `discoverable`, `online`, `isDemo`, `bio`, `bioBn`, `openingHours`, `rating`, `reviewCount`, `lastSeen`). Users who set `discoverable == false` cannot be read or listed by other users.
+5. **Isolated Demo 1-to-1 Chats:**
+   - 1-to-1 conversations and auto-replies with demo personas are stored strictly inside the signed-in user's own subtree (`/users/{userId}/demoConversations/{convId}` and `/users/{userId}/demoMessages/{msgId}`), readable and writable solely by `isOwner(userId)` — never touching top-level `/conversations` or impersonating another real user UID.
+6. **Community Room Safety & Rate Limiting:**
+   - `/rooms/{roomId}/messages/{messageId}` enforces `text.size() <= 2000`, `createdAt == request.time`, `!isMutedInRoom(roomId, request.auth.uid)`, and per-user rate limiting (>= 900ms between messages via `/rooms/{roomId}/members/{uid}.lastMessageAt`).
+   - Non-admin users can only update `reactions` (when unmuted) or append reports to `reportedBy`; only admins can delete or moderate any room message or mute/unmute users.
+7. **Relational, Master Gate & Bidirectional Block Integrity:**
    - Creating a `FoodClaim` requires an active parent `/listings/{listingId}` document verified via `exists()` and `get()`.
    - Pending or rejected `restaurantOwner` accounts are blocked from creating new `/listings/{listingId}` documents until `restaurant.verificationStatus == 'approved'`.
-   - Creating a `DonorReview` requires a `completed` `/claims/{claimId}` belonging to `request.auth.uid`.
-   - `/conversations/{conversationId}/messages/{messageId}` is strictly gated via `get()` on the parent `/conversations/{conversationId}` verifying participant membership AND verifying `!isBlockedBetween(uidA, uidB)`. Message body (`text`, `messageType`, `senderId`, `createdAt`) cannot be edited after creation; only `deliveredTo`, `readBy`, `status`, `readAt`, `deletedFor`, and `reactions` may be updated by participants.
-6. **Temporal Integrity & Immutability:** `createdAt` and `updatedAt` must equal `request.time`; `createdAt`, `uid`, `donorId`, `recipientId`, `listingId`, `ownerUid`, and `pickupCode` cannot be altered on update. Real non-demo message creation enforces a rapid-burst rate limit check against `lastMessageAt`.
-7. **Terminal State Locking:** Completed, cancelled, or expired claims (`FoodClaim`) and completed or cancelled shift signups (`VolunteerShiftSignup`) cannot transition after reaching terminal status (except by verified admin override).
-8. **Payload & Path Bounds:** All document IDs match `^[a-zA-Z0-9_\-]+$` (`<= 128` chars), messages cap `text` at `2000` chars, arrays cap sizes (`participants <= 2`, `dietaryTags <= 10`, `readBy <= 2`, `deliveredTo <= 2`, `deletedFor <= 2`), and strict `keys().hasAll(...) && keys().hasOnly(...)` / `affectedKeys().hasOnly(...)` block shadow fields.
+   - `/conversations/{conversationId}/messages/{messageId}` is strictly gated via `get()` on the parent `/conversations/{conversationId}` verifying participant membership AND `!isBlockedBetween(uidA, uidB)`.
+8. **Payload & Path Bounds:** All document IDs match `^[a-zA-Z0-9_\-]+$` (`<= 128` chars), messages cap `text` at `2000` chars, arrays cap sizes, and strict `keys().hasAll(...) && keys().hasOnly(...)` / `affectedKeys().hasOnly(...)` block shadow fields.
 
-## 2. The "Dirty Dozen" (+ Messenger Security) Adversarial Payloads
-1. **Identity Spoofing (Listing):** Authenticated user `recip_A` submits `/listings/list_1` with `donorId: "donor_B"`. Expected: `PERMISSION_DENIED`.
-2. **Self-Assigned Verified Flag / Admin Role (User Create & Directory):** New user submits `/users/uid_A` with `verified: true` or `/userDirectory/uid_A` with `role: "admin"`, or self-writes `/admins/uid_A`. Expected: `PERMISSION_DENIED`.
-3. **Ghost / Shadow Field Injection (Update & PII Leakage):** User writes `email` into `/userDirectory/uid_A` or donor updates `/listings/list_1` adding `donorVerified: true`. Expected: `PERMISSION_DENIED`.
-4. **PII & Private Data Blanket Read (Guest & Cross-User):** Guest reads `/userDirectory` or signed-in non-admin user `uid_B` reads `/users/uid_A/private/info` or `/users/uid_A/notifications`. Expected: `PERMISSION_DENIED`.
-5. **Email Spoofing (Unverified Admin):** Attacker connects with admin email and `email_verified: false`. Expected: `PERMISSION_DENIED`.
-6. **State Shortcutting (Review Before Completion / Pending Listing Post):** Pending restaurant owner creates `/listings/list_1`, or recipient submits `/reviews/rev_1` referencing a `requested` claim. Expected: `PERMISSION_DENIED`.
-7. **Terminal State Reopening:** Recipient updates a `completed` claim back to `requested`. Expected: `PERMISSION_DENIED`.
-8. **Array Poisoning:** Donor creates a listing with `dietaryTags: [12345]` or >10 tags, or creates a conversation with >2 `participants`. Expected: `PERMISSION_DENIED`.
-9. **ID Poisoning:** Client writes `/listings/bad$doc..injection` or 500-char ID. Expected: `PERMISSION_DENIED`.
-10. **Timestamp Forgery & Oversized Message:** User submits `/conversations/c1/messages/m1` with `text` > 2000 chars or a backdated `createdAt`. Expected: `PERMISSION_DENIED`.
-11. **Unauthorized List Scraping & Unsolicited Notification Spam:** Non-participant lists `/conversations` or injects fake `welcome`/`system` notifications into `/users/uid_B/notifications`. Expected: `PERMISSION_DENIED`.
-12. **Blocked User / Non-Participant / Message Text Edit:** Blocked user or outsider sends a message in `/conversations/direct_A_B/messages`, or participant edits `text` on an existing message. Expected: `PERMISSION_DENIED`.
+## 2. Adversarial Payloads Covered
+1. Identity spoofing on listing, conversation, or room message (`senderId != request.auth.uid`).
+2. Self-assigned `verified: true`, `role: "admin"`, or `isDemo: true` by a non-admin user.
+3. PII field injection (`email`, `phone`) on `/userDirectory` or `/rooms`.
+4. Guest read/list on `/userDirectory`, `/rooms`, `/conversations`, or cross-user `/users/{uid}/demoConversations`.
+5. Unverified email admin spoof attempt.
+6. State shortcutting (pending restaurant creating listing; review on uncompleted claim).
+7. Terminal state reopening on completed/cancelled claims or shift signups.
+8. Array poisoning (>2 participants in 1-to-1 chat, >10 dietary tags).
+9. Path / ID poisoning (`../bad$doc`).
+10. Oversized message (`> 2000` chars), backdated `createdAt`, or muted user posting in community room.
+11. Unsolicited cross-user notification spoofing or cross-user demo message injection.
+12. Blocked peer sending a 1-to-1 message or editing existing message `text`.

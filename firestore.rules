@@ -129,19 +129,26 @@ service cloud.firestore {
         && data.keys().hasOnly([
           'uid', 'displayName', 'handle', 'photoURL', 'role', 'restaurantName',
           'restaurantType', 'area', 'verified', 'discoverable', 'online',
+          'isDemo', 'bio', 'bioBn', 'openingHours', 'rating', 'reviewCount',
           'lastSeen', 'createdAt', 'updatedAt'
         ])
         && isValidId(data.uid)
         && data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 100
         && data.handle is string && data.handle.size() >= 3 && data.handle.size() <= 40
         && (!('photoURL' in data) || data.photoURL == null || (data.photoURL is string && data.photoURL.size() <= 250000))
-        && data.role in ['user', 'restaurantOwner', 'recipient', 'donor', 'admin']
+        && data.role in ['user', 'restaurantOwner', 'recipient', 'donor', 'admin', 'volunteer', 'ngo', 'organizer']
         && (!('restaurantName' in data) || data.restaurantName == null || (data.restaurantName is string && data.restaurantName.size() <= 120))
         && (!('restaurantType' in data) || data.restaurantType == null || (data.restaurantType is string && data.restaurantType.size() <= 40))
         && data.area is string && data.area.size() >= 1 && data.area.size() <= 80
         && data.verified is bool
         && data.discoverable is bool
         && data.online is bool
+        && (!('isDemo' in data) || data.isDemo is bool)
+        && (!('bio' in data) || data.bio == null || (data.bio is string && data.bio.size() <= 400))
+        && (!('bioBn' in data) || data.bioBn == null || (data.bioBn is string && data.bioBn.size() <= 500))
+        && (!('openingHours' in data) || data.openingHours == null || (data.openingHours is string && data.openingHours.size() <= 80))
+        && (!('rating' in data) || data.rating == null || (data.rating is number && data.rating >= 0 && data.rating <= 5))
+        && (!('reviewCount' in data) || data.reviewCount == null || (data.reviewCount is number && data.reviewCount >= 0 && data.reviewCount <= 100000))
         && data.lastSeen is timestamp
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;
@@ -201,17 +208,176 @@ service cloud.firestore {
 
     function isValidUserReport(data) {
       return data.keys().hasAll(['reporterId', 'targetUserId', 'targetName', 'reason', 'status', 'createdAt', 'updatedAt'])
-        && data.keys().hasOnly(['reporterId', 'targetUserId', 'targetName', 'conversationId', 'reason', 'details', 'status', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly([
+          'reporterId', 'targetUserId', 'targetName', 'conversationId',
+          'roomId', 'messageId', 'reason', 'details', 'status', 'createdAt', 'updatedAt'
+        ])
         && isValidId(data.reporterId)
         && isValidId(data.targetUserId)
         && data.reporterId != data.targetUserId
         && data.targetName is string && data.targetName.size() >= 1 && data.targetName.size() <= 120
         && (!('conversationId' in data) || data.conversationId == null || isValidId(data.conversationId))
+        && (!('roomId' in data) || data.roomId == null || isValidId(data.roomId))
+        && (!('messageId' in data) || data.messageId == null || isValidId(data.messageId))
         && data.reason is string && data.reason.size() >= 2 && data.reason.size() <= 120
         && (!('details' in data) || data.details == null || (data.details is string && data.details.size() <= 1000))
         && data.status in ['open', 'reviewed', 'resolved']
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;
+    }
+
+    function isValidDemoConversation(data) {
+      return data.keys().hasAll([
+          'personaId', 'personaName', 'lastMessage', 'lastMessageType',
+          'lastMessageAt', 'unreadCount', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'personaId', 'personaName', 'personaHandle', 'personaRole', 'personaArea',
+          'personaAvatar', 'personaVerified', 'isOfficial',
+          'lastMessage', 'lastMessageType', 'lastMessageSenderId', 'lastMessageAt',
+          'unreadCount', 'isMuted', 'isArchived', 'createdAt', 'updatedAt'
+        ])
+        && isValidId(data.personaId)
+        && data.personaName is string && data.personaName.size() >= 1 && data.personaName.size() <= 120
+        && (!('personaHandle' in data) || data.personaHandle == null || (data.personaHandle is string && data.personaHandle.size() <= 40))
+        && (!('personaRole' in data) || data.personaRole == null || (data.personaRole is string && data.personaRole.size() <= 40))
+        && (!('personaArea' in data) || data.personaArea == null || (data.personaArea is string && data.personaArea.size() <= 80))
+        && (!('personaAvatar' in data) || data.personaAvatar == null || (data.personaAvatar is string && data.personaAvatar.size() <= 250000))
+        && (!('personaVerified' in data) || data.personaVerified is bool)
+        && (!('isOfficial' in data) || data.isOfficial is bool)
+        && data.lastMessage is string && data.lastMessage.size() <= 500
+        && data.lastMessageType in ['text', 'image', 'file', 'location', 'audio', 'call_log', 'system']
+        && (!('lastMessageSenderId' in data) || data.lastMessageSenderId == null || isValidId(data.lastMessageSenderId))
+        && data.lastMessageAt is timestamp
+        && data.unreadCount is number && data.unreadCount >= 0 && data.unreadCount <= 10000
+        && (!('isMuted' in data) || data.isMuted is bool)
+        && (!('isArchived' in data) || data.isArchived is bool)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidDemoMessage(data) {
+      return data.keys().hasAll([
+          'conversationId', 'personaId', 'senderId', 'text', 'messageType', 'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'conversationId', 'personaId', 'senderId', 'senderName', 'text', 'messageType',
+          'mediaUrl', 'fileName', 'fileSize', 'fileMime',
+          'locationLat', 'locationLng', 'locationLabel', 'locationExpiresAt', 'durationSec',
+          'replyToId', 'replyToText', 'forwardedFrom', 'reactions', 'isDemoAutoReply', 'createdAt'
+        ])
+        && isValidId(data.conversationId)
+        && isValidId(data.personaId)
+        && isValidId(data.senderId)
+        && (!('senderName' in data) || data.senderName == null || (data.senderName is string && data.senderName.size() <= 120))
+        && data.text is string && data.text.size() <= 2000
+        && data.messageType in ['text', 'image', 'file', 'location', 'audio', 'call_log', 'system']
+        && (!('mediaUrl' in data) || data.mediaUrl == null || (data.mediaUrl is string && data.mediaUrl.size() <= 450000))
+        && (!('fileName' in data) || data.fileName == null || (data.fileName is string && data.fileName.size() <= 160))
+        && (!('fileSize' in data) || data.fileSize == null || (data.fileSize is number && data.fileSize >= 0 && data.fileSize <= 26214400))
+        && (!('fileMime' in data) || data.fileMime == null || (data.fileMime is string && data.fileMime.size() <= 100))
+        && (!('locationLat' in data) || data.locationLat == null || (data.locationLat is number && data.locationLat >= -90 && data.locationLat <= 90))
+        && (!('locationLng' in data) || data.locationLng == null || (data.locationLng is number && data.locationLng >= -180 && data.locationLng <= 180))
+        && (!('locationLabel' in data) || data.locationLabel == null || (data.locationLabel is string && data.locationLabel.size() <= 160))
+        && (!('locationExpiresAt' in data) || data.locationExpiresAt == null || (data.locationExpiresAt is string && data.locationExpiresAt.size() <= 64))
+        && (!('durationSec' in data) || data.durationSec == null || (data.durationSec is number && data.durationSec >= 0 && data.durationSec <= 600))
+        && (!('replyToId' in data) || data.replyToId == null || isValidId(data.replyToId))
+        && (!('replyToText' in data) || data.replyToText == null || (data.replyToText is string && data.replyToText.size() <= 200))
+        && (!('forwardedFrom' in data) || data.forwardedFrom == null || (data.forwardedFrom is string && data.forwardedFrom.size() <= 120))
+        && (!('reactions' in data) || (data.reactions is map && data.reactions.size() <= 8))
+        && (!('isDemoAutoReply' in data) || data.isDemoAutoReply is bool)
+        && data.createdAt is timestamp;
+    }
+
+    function isValidCommunityRoom(data) {
+      return data.keys().hasAll([
+          'slug', 'name', 'nameBn', 'iconKey', 'pinnedOrder', 'memberCount', 'onlineCount',
+          'lastMessage', 'lastMessageAt', 'mutedUids', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'slug', 'name', 'nameBn', 'description', 'descriptionBn', 'iconKey', 'pinnedOrder',
+          'memberCount', 'onlineCount', 'lastMessage', 'lastMessageSenderName', 'lastMessageAt',
+          'mutedUids', 'isDemoSeeded', 'createdAt', 'updatedAt'
+        ])
+        && data.slug is string && data.slug.size() >= 2 && data.slug.size() <= 64
+        && data.name is string && data.name.size() >= 2 && data.name.size() <= 100
+        && data.nameBn is string && data.nameBn.size() >= 2 && data.nameBn.size() <= 120
+        && (!('description' in data) || (data.description is string && data.description.size() <= 300))
+        && (!('descriptionBn' in data) || (data.descriptionBn is string && data.descriptionBn.size() <= 400))
+        && data.iconKey in ['community', 'restaurant', 'volunteer']
+        && data.pinnedOrder is number && data.pinnedOrder >= 0 && data.pinnedOrder <= 100
+        && data.memberCount is number && data.memberCount >= 0 && data.memberCount <= 100000
+        && data.onlineCount is number && data.onlineCount >= 0 && data.onlineCount <= 100000
+        && data.lastMessage is string && data.lastMessage.size() <= 500
+        && (!('lastMessageSenderName' in data) || (data.lastMessageSenderName is string && data.lastMessageSenderName.size() <= 120))
+        && data.lastMessageAt is timestamp
+        && data.mutedUids is list && data.mutedUids.size() <= 500
+        && (!('isDemoSeeded' in data) || data.isDemoSeeded is bool)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidRoomMember(data) {
+      return data.keys().hasAll(['uid', 'displayName', 'role', 'online', 'updatedAt'])
+        && data.keys().hasOnly([
+          'uid', 'displayName', 'handle', 'photoURL', 'role', 'area',
+          'online', 'isDemo', 'lastMessageAt', 'updatedAt'
+        ])
+        && isValidId(data.uid)
+        && data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 100
+        && (!('handle' in data) || data.handle == null || (data.handle is string && data.handle.size() <= 40))
+        && (!('photoURL' in data) || data.photoURL == null || (data.photoURL is string && data.photoURL.size() <= 250000))
+        && data.role in ['user', 'restaurantOwner', 'recipient', 'donor', 'admin', 'volunteer', 'ngo', 'organizer']
+        && (!('area' in data) || data.area == null || (data.area is string && data.area.size() <= 80))
+        && data.online is bool
+        && (!('isDemo' in data) || data.isDemo is bool)
+        && (!('lastMessageAt' in data) || data.lastMessageAt == null || data.lastMessageAt is timestamp)
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidRoomMessage(data) {
+      return data.keys().hasAll([
+          'roomId', 'senderId', 'senderName', 'senderRole', 'senderVerified',
+          'senderIsDemo', 'text', 'messageType', 'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'roomId', 'senderId', 'senderName', 'senderHandle', 'senderAvatar',
+          'senderRole', 'senderArea', 'senderVerified', 'senderIsDemo',
+          'text', 'messageType', 'mediaUrl', 'replyToId', 'replyToText', 'replyToSenderName',
+          'reactions', 'reportedBy', 'deleted', 'isDemo', 'createdAt'
+        ])
+        && isValidId(data.roomId)
+        && isValidId(data.senderId)
+        && data.senderName is string && data.senderName.size() >= 1 && data.senderName.size() <= 120
+        && (!('senderHandle' in data) || data.senderHandle == null || (data.senderHandle is string && data.senderHandle.size() <= 40))
+        && (!('senderAvatar' in data) || data.senderAvatar == null || (data.senderAvatar is string && data.senderAvatar.size() <= 250000))
+        && data.senderRole in ['user', 'restaurantOwner', 'recipient', 'donor', 'admin', 'volunteer', 'ngo', 'organizer']
+        && (!('senderArea' in data) || data.senderArea == null || (data.senderArea is string && data.senderArea.size() <= 80))
+        && data.senderVerified is bool
+        && data.senderIsDemo is bool
+        && data.text is string && data.text.size() <= 2000
+        && data.messageType in ['text', 'image']
+        && (!('mediaUrl' in data) || data.mediaUrl == null || (data.mediaUrl is string && data.mediaUrl.size() <= 450000))
+        && (!('replyToId' in data) || data.replyToId == null || isValidId(data.replyToId))
+        && (!('replyToText' in data) || data.replyToText == null || (data.replyToText is string && data.replyToText.size() <= 200))
+        && (!('replyToSenderName' in data) || data.replyToSenderName == null || (data.replyToSenderName is string && data.replyToSenderName.size() <= 120))
+        && (!('reactions' in data) || (data.reactions is map && data.reactions.size() <= 8))
+        && (!('reportedBy' in data) || (data.reportedBy is list && data.reportedBy.size() <= 200))
+        && (!('deleted' in data) || data.deleted is bool)
+        && (!('isDemo' in data) || data.isDemo is bool)
+        && data.createdAt is timestamp;
+    }
+
+    function isMutedInRoom(roomId, uid) {
+      return exists(/databases/$(database)/documents/rooms/$(roomId))
+        && (uid in get(/databases/$(database)/documents/rooms/$(roomId)).data.mutedUids);
+    }
+
+    function roomRateLimitOk(roomId, uid) {
+      return !exists(/databases/$(database)/documents/rooms/$(roomId)/members/$(uid))
+        || !('lastMessageAt' in get(/databases/$(database)/documents/rooms/$(roomId)/members/$(uid)).data)
+        || get(/databases/$(database)/documents/rooms/$(roomId)/members/$(uid)).data.lastMessageAt == null
+        || request.time >= get(/databases/$(database)/documents/rooms/$(roomId)/members/$(uid)).data.lastMessageAt + duration.value(900, 'ms');
     }
 
     function isValidFoodListing(data) {
@@ -357,7 +523,7 @@ service cloud.firestore {
         && (!('listingTitle' in data) || data.listingTitle == null || (data.listingTitle is string && data.listingTitle.size() <= 140))
         && (!('participantProfiles' in data) || (data.participantProfiles is map && data.participantProfiles.size() <= 4))
         && (!('isDemo' in data) || data.isDemo is bool)
-        && (!('demoShopKey' in data) || data.demoShopKey == null || data.demoShopKey in ['team', 'biryani', 'mishti', 'bakery'])
+        && (!('demoShopKey' in data) || data.demoShopKey == null || (data.demoShopKey is string && data.demoShopKey.size() <= 64))
         && (!('demoOwnerUid' in data) || data.demoOwnerUid == null || isValidId(data.demoOwnerUid))
         && data.lastMessage is string && data.lastMessage.size() <= 500
         && data.lastMessageType in ['text', 'image', 'file', 'location', 'audio', 'call_log', 'system']
@@ -528,7 +694,7 @@ service cloud.firestore {
       allow list, write: if false;
     }
 
-    // --- Zero-PII Public User Directory (Find People & Online Presence) ---
+    // --- Zero-PII Public User Directory (Real Users + Admin-Seeded Demo Personas) ---
     match /userDirectory/{userId} {
       allow get: if isValidId(userId) && isVerifiedUser() && (
         existing().discoverable == true || isOwner(userId) || isAdmin()
@@ -538,16 +704,17 @@ service cloud.firestore {
         resource.data.uid == request.auth.uid ||
         isAdmin()
       );
-      allow create: if isOwner(userId)
-        && isValidId(userId)
+      allow create: if isValidId(userId)
         && isValidUserDirectoryProfile(incoming())
-        && incoming().uid == request.auth.uid
+        && incoming().uid == userId
         && incoming().createdAt == request.time
         && incoming().updatedAt == request.time
         && incoming().lastSeen == request.time
         && (
           isAdmin() || (
-            incoming().role != 'admin'
+            isOwner(userId)
+            && incoming().role in ['user', 'restaurantOwner', 'recipient', 'donor', 'volunteer', 'ngo', 'organizer']
+            && (!('isDemo' in incoming()) || incoming().isDemo == false)
             && (incoming().verified == false || userDocVerifiedStatus(userId))
           )
         );
@@ -559,6 +726,8 @@ service cloud.firestore {
         && (
           isAdmin() || (
             isOwner(userId)
+            && (!('isDemo' in existing()) || existing().isDemo == false)
+            && (!('isDemo' in incoming()) || incoming().isDemo == false)
             && incoming().role == existing().role
             && (incoming().verified == existing().verified || incoming().verified == userDocVerifiedStatus(userId))
             && incoming().diff(existing()).affectedKeys().hasOnly([
@@ -570,7 +739,7 @@ service cloud.firestore {
       allow delete: if isValidId(userId) && isAdmin();
     }
 
-    // --- User Profiles, Blocked List, Notifications & Restaurant Owner Applications ---
+    // --- User Profiles, Blocked List, Notifications, Isolated Demo Chats & Restaurant Applications ---
     match /users/{userId} {
       allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
       allow list: if isVerifiedUser() && (resource.data.uid == request.auth.uid || isAdmin());
@@ -723,6 +892,142 @@ service cloud.firestore {
           && incoming().updatedAt == request.time
           && incoming().diff(existing()).affectedKeys().hasOnly(['read', 'updatedAt']);
         allow delete: if isValidId(notificationId) && (isOwner(userId) || isAdmin());
+      }
+
+      // Isolated Client-Side Demo Persona 1-to-1 Conversations (Strictly Owner-Only)
+      match /demoConversations/{convId} {
+        allow get: if isValidId(convId) && isOwner(userId);
+        allow list: if isOwner(userId);
+        allow create: if isValidId(convId)
+          && isOwner(userId)
+          && isValidDemoConversation(incoming())
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time
+          && incoming().lastMessageAt == request.time;
+        allow update: if isValidId(convId)
+          && isOwner(userId)
+          && isValidDemoConversation(incoming())
+          && incoming().personaId == existing().personaId
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time;
+        allow delete: if isValidId(convId) && isOwner(userId);
+      }
+
+      // Isolated Client-Side Demo Persona Messages (Strictly Owner-Only)
+      match /demoMessages/{msgId} {
+        allow get: if isValidId(msgId) && isOwner(userId);
+        allow list: if isOwner(userId);
+        allow create: if isValidId(msgId)
+          && isOwner(userId)
+          && isValidDemoMessage(incoming())
+          && (
+            incoming().senderId == request.auth.uid ||
+            incoming().senderId == incoming().personaId
+          )
+          && incoming().createdAt == request.time;
+        allow update: if isValidId(msgId)
+          && isOwner(userId)
+          && isValidDemoMessage(incoming())
+          && incoming().conversationId == existing().conversationId
+          && incoming().personaId == existing().personaId
+          && incoming().senderId == existing().senderId
+          && incoming().text == existing().text
+          && incoming().createdAt == existing().createdAt
+          && incoming().diff(existing()).affectedKeys().hasOnly(['reactions']);
+        allow delete: if isValidId(msgId) && isOwner(userId);
+      }
+    }
+
+    // --- Rizik Community Group Chat Rooms ---
+    match /rooms/{roomId} {
+      allow get: if isValidId(roomId) && isVerifiedUser();
+      allow list: if isVerifiedUser();
+      allow create: if isValidId(roomId)
+        && isAdmin()
+        && isValidCommunityRoom(incoming())
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isValidId(roomId)
+        && isVerifiedUser()
+        && isValidCommunityRoom(incoming())
+        && incoming().slug == existing().slug
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin() || (
+            !(request.auth.uid in existing().mutedUids)
+            && incoming().mutedUids == existing().mutedUids
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'lastMessage', 'lastMessageSenderName', 'lastMessageAt',
+              'onlineCount', 'memberCount', 'updatedAt'
+            ])
+          )
+        );
+      allow delete: if isValidId(roomId) && isAdmin();
+
+      match /members/{memberId} {
+        allow get: if isValidId(roomId) && isValidId(memberId) && isVerifiedUser();
+        allow list: if isValidId(roomId) && isVerifiedUser();
+        allow create, update: if isValidId(roomId)
+          && isValidId(memberId)
+          && (isOwner(memberId) || isAdmin())
+          && isValidRoomMember(incoming())
+          && incoming().uid == memberId
+          && incoming().updatedAt == request.time;
+        allow delete: if isValidId(roomId) && isValidId(memberId) && isAdmin();
+      }
+
+      match /messages/{messageId} {
+        allow get: if isValidId(roomId) && isValidId(messageId) && isVerifiedUser();
+        allow list: if isValidId(roomId) && isVerifiedUser();
+        allow create: if isValidId(roomId)
+          && isValidId(messageId)
+          && isVerifiedUser()
+          && isValidRoomMessage(incoming())
+          && incoming().roomId == roomId
+          && incoming().text.size() <= 2000
+          && !isMutedInRoom(roomId, request.auth.uid)
+          && (
+            (
+              isAdmin()
+              && 'isDemo' in incoming()
+              && incoming().isDemo == true
+              && incoming().senderIsDemo == true
+              && incoming().createdAt <= request.time
+              && incoming().createdAt >= request.time - duration.value(10, 'd')
+            ) || (
+              incoming().createdAt == request.time
+              && incoming().senderId == request.auth.uid
+              && incoming().senderIsDemo == false
+              && (!('isDemo' in incoming()) || incoming().isDemo == false)
+              && (!('deleted' in incoming()) || incoming().deleted == false)
+              && roomRateLimitOk(roomId, request.auth.uid)
+            )
+          );
+        allow update: if isValidId(roomId)
+          && isValidId(messageId)
+          && isVerifiedUser()
+          && isValidRoomMessage(incoming())
+          && incoming().roomId == existing().roomId
+          && incoming().senderId == existing().senderId
+          && incoming().text == existing().text
+          && incoming().messageType == existing().messageType
+          && incoming().createdAt == existing().createdAt
+          && (
+            isAdmin() ||
+            (
+              !isMutedInRoom(roomId, request.auth.uid)
+              && incoming().diff(existing()).affectedKeys().hasOnly(['reactions'])
+            ) ||
+            incoming().diff(existing()).affectedKeys().hasOnly(['reportedBy'])
+          );
+        allow delete: if isValidId(roomId) && isValidId(messageId) && (
+          isAdmin() || (
+            isVerifiedUser()
+            && existing().senderId == request.auth.uid
+            && existing().senderIsDemo == false
+          )
+        );
       }
     }
 
@@ -1020,7 +1325,7 @@ service cloud.firestore {
       allow delete: if isValidId(signupId) && isAdmin();
     }
 
-    // --- Messenger 1-to-1, Pickup Coordination & Demo Conversations ---
+    // --- Messenger Real 1-to-1 & Pickup Coordination Conversations ---
     match /conversations/{conversationId} {
       allow get: if isValidId(conversationId) && isVerifiedUser() && (
         (resource == null && conversationId.split('_').hasAny([request.auth.uid])) ||
@@ -1044,22 +1349,11 @@ service cloud.firestore {
         && incoming().createdAt == request.time
         && incoming().updatedAt == request.time
         && incoming().lastMessageAt == request.time
-        && (
-          (
-            'isDemo' in incoming()
-            && incoming().isDemo == true
-            && 'demoOwnerUid' in incoming()
-            && incoming().demoOwnerUid == request.auth.uid
-            && incoming().uidA == request.auth.uid
-            && incoming().participants.size() == 1
-          ) || (
-            (!('isDemo' in incoming()) || incoming().isDemo == false)
-            && incoming().uidA in incoming().participants
-            && incoming().uidB in incoming().participants
-            && incoming().uidA != incoming().uidB
-            && !isBlockedBetween(incoming().uidA, incoming().uidB)
-          )
-        );
+        && (!('isDemo' in incoming()) || incoming().isDemo == false)
+        && incoming().uidA in incoming().participants
+        && incoming().uidB in incoming().participants
+        && incoming().uidA != incoming().uidB
+        && !isBlockedBetween(incoming().uidA, incoming().uidB);
       allow update: if isVerifiedUser()
         && isValidId(conversationId)
         && isValidChatConversation(incoming())
@@ -1074,6 +1368,7 @@ service cloud.firestore {
             'mutedBy', 'archivedBy', 'deletedFor', 'unreadCount', 'updatedAt'
           ]) || (
             incoming().diff(existing()).affectedKeys().hasOnly([
+              'listingId', 'listingTitle',
               'lastMessage', 'lastMessageType', 'lastMessageSenderId', 'lastMessageAt',
               'unreadCount', 'mutedBy', 'archivedBy', 'deletedFor', 'typingBy',
               'participantProfiles', 'updatedAt'
@@ -1108,34 +1403,18 @@ service cloud.firestore {
           && incoming().conversationId == conversationId
           && incoming().participants == get(/databases/$(database)/documents/conversations/$(conversationId)).data.participants
           && incoming().createdAt == request.time
+          && (!('isDemo' in get(/databases/$(database)/documents/conversations/$(conversationId)).data) ||
+            get(/databases/$(database)/documents/conversations/$(conversationId)).data.isDemo == false)
+          && incoming().senderId == request.auth.uid
+          && (!('isDemoAutoReply' in incoming()) || incoming().isDemoAutoReply == false)
+          && !isBlockedBetween(
+            get(/databases/$(database)/documents/conversations/$(conversationId)).data.uidA,
+            get(/databases/$(database)/documents/conversations/$(conversationId)).data.uidB
+          )
           && (
-            (
-              'isDemo' in get(/databases/$(database)/documents/conversations/$(conversationId)).data
-              && get(/databases/$(database)/documents/conversations/$(conversationId)).data.isDemo == true
-              && get(/databases/$(database)/documents/conversations/$(conversationId)).data.demoOwnerUid == request.auth.uid
-              && (
-                incoming().senderId == request.auth.uid ||
-                (
-                  'isDemoAutoReply' in incoming()
-                  && incoming().isDemoAutoReply == true
-                  && incoming().senderId == 'demo_' + get(/databases/$(database)/documents/conversations/$(conversationId)).data.demoShopKey
-                )
-              )
-            ) || (
-              (!('isDemo' in get(/databases/$(database)/documents/conversations/$(conversationId)).data) ||
-                get(/databases/$(database)/documents/conversations/$(conversationId)).data.isDemo == false)
-              && incoming().senderId == request.auth.uid
-              && (!('isDemoAutoReply' in incoming()) || incoming().isDemoAutoReply == false)
-              && !isBlockedBetween(
-                get(/databases/$(database)/documents/conversations/$(conversationId)).data.uidA,
-                get(/databases/$(database)/documents/conversations/$(conversationId)).data.uidB
-              )
-              && (
-                !('lastMessageSenderId' in get(/databases/$(database)/documents/conversations/$(conversationId)).data) ||
-                get(/databases/$(database)/documents/conversations/$(conversationId)).data.lastMessageSenderId != request.auth.uid ||
-                request.time >= get(/databases/$(database)/documents/conversations/$(conversationId)).data.lastMessageAt + duration.value(350, 'ms')
-              )
-            )
+            !('lastMessageSenderId' in get(/databases/$(database)/documents/conversations/$(conversationId)).data) ||
+            get(/databases/$(database)/documents/conversations/$(conversationId)).data.lastMessageSenderId != request.auth.uid ||
+            request.time >= get(/databases/$(database)/documents/conversations/$(conversationId)).data.lastMessageAt + duration.value(350, 'ms')
           );
         allow update: if isValidId(conversationId)
           && isValidId(messageId)

@@ -2,18 +2,20 @@ import { useMemo, useState } from 'react';
 import {
   BadgeCheck,
   Ban,
+  Check,
+  Clock,
   Loader2,
   MapPin,
   MessageCircle,
   Search,
-  ShieldCheck,
-  Store,
-  User as UserIcon,
+  Star,
   Users,
   X,
 } from 'lucide-react';
 import type { UserDirectoryEntry } from '../types';
+import { DemoBadge } from './DemoBadge';
 import { ShopAvatar } from './ShopAvatar';
+import { getRoleMeta, RoleIcon } from './UserProfileModal';
 import { useI18n } from '../i18n/I18nContext';
 
 type DirectoryTab = 'all' | 'restaurants' | 'people' | 'online';
@@ -39,34 +41,45 @@ export function FindPeopleModal({
   blockedUids,
   onSelectPerson,
 }: FindPeopleModalProps) {
-  const { t, formatNumber, formatArea } = useI18n();
+  const { lang, t, formatNumber, formatArea } = useI18n();
   const [tab, setTab] = useState<DirectoryTab>('all');
+  const [includeDemo, setIncludeDemo] = useState(true);
   const [search, setSearch] = useState('');
   const [openingUid, setOpeningUid] = useState<string | null>(null);
 
+  const visibleByDemoToggle = useMemo(() => {
+    if (includeDemo) return entries;
+    return entries.filter((e) => !e.isDemo && !e.uid.startsWith('demo_'));
+  }, [entries, includeDemo]);
+
+  const demoCount = useMemo(
+    () => entries.filter((e) => Boolean(e.isDemo) || e.uid.startsWith('demo_')).length,
+    [entries]
+  );
+
   const counts = useMemo(() => {
-    const restaurants = entries.filter(
+    const restaurants = visibleByDemoToggle.filter(
       (e) => e.role === 'restaurantOwner' || e.role === 'donor'
     ).length;
-    const people = entries.filter(
-      (e) => e.role === 'user' || e.role === 'recipient' || e.role === 'admin'
+    const people = visibleByDemoToggle.filter(
+      (e) => e.role !== 'restaurantOwner' && e.role !== 'donor'
     ).length;
-    const online = entries.filter((e) => e.online).length;
+    const online = visibleByDemoToggle.filter((e) => e.online).length;
     return {
-      all: entries.length,
+      all: visibleByDemoToggle.length,
       restaurants,
       people,
       online,
     };
-  }, [entries]);
+  }, [visibleByDemoToggle]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return entries.filter((e) => {
+    return visibleByDemoToggle.filter((e) => {
       if (tab === 'restaurants' && e.role !== 'restaurantOwner' && e.role !== 'donor') {
         return false;
       }
-      if (tab === 'people' && e.role !== 'user' && e.role !== 'recipient' && e.role !== 'admin') {
+      if (tab === 'people' && (e.role === 'restaurantOwner' || e.role === 'donor')) {
         return false;
       }
       if (tab === 'online' && !e.online) {
@@ -77,15 +90,18 @@ export function FindPeopleModal({
         e.displayName.toLowerCase().includes(q) ||
         e.handle.toLowerCase().includes(q) ||
         (e.restaurantName ?? '').toLowerCase().includes(q) ||
+        (e.bio ?? '').toLowerCase().includes(q) ||
+        (e.bioBn ?? '').toLowerCase().includes(q) ||
         e.area.toLowerCase().includes(q)
       );
     });
-  }, [entries, tab, search]);
+  }, [visibleByDemoToggle, tab, search]);
 
   if (!open) return null;
 
   const formatLastSeen = (entry: UserDirectoryEntry) => {
     if (entry.online) return t('findPeople.onlineNow');
+    if (entry.isDemo) return t('findPeople.offline');
     if (!entry.lastSeen) return t('findPeople.offline');
     const diffMin = Math.max(0, Math.round((Date.now() - new Date(entry.lastSeen).getTime()) / 60_000));
     if (diffMin < 2) return t('findPeople.lastSeenJustNow');
@@ -93,31 +109,6 @@ export function FindPeopleModal({
     const hrs = Math.floor(diffMin / 60);
     if (hrs < 24) return t('findPeople.lastSeenHours', { count: formatNumber(hrs) });
     return t('findPeople.offline');
-  };
-
-  const getRoleChip = (role: UserDirectoryEntry['role']) => {
-    if (role === 'admin') {
-      return (
-        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-[var(--brand-primary)] text-[var(--brand-primary-fg)] text-[10px] font-bold shrink-0">
-          <ShieldCheck className="w-2.5 h-2.5 shrink-0" />
-          {t('findPeople.roleAdmin')}
-        </span>
-      );
-    }
-    if (role === 'restaurantOwner' || role === 'donor') {
-      return (
-        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-[var(--brand-accent-soft)] text-[var(--brand-accent-text)] text-[10px] font-bold shrink-0">
-          <Store className="w-2.5 h-2.5 shrink-0" />
-          {t('findPeople.roleRestaurant')}
-        </span>
-      );
-    }
-    return (
-      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-[var(--brand-soft)] text-[var(--brand-text)] text-[10px] font-bold shrink-0">
-        <UserIcon className="w-2.5 h-2.5 shrink-0" />
-        {t('findPeople.roleUser')}
-      </span>
-    );
   };
 
   const tabs: { id: DirectoryTab; label: string; count: number }[] = [
@@ -164,7 +155,7 @@ export function FindPeopleModal({
           </button>
         </div>
 
-        {/* Search & Tabs */}
+        {/* Search, Tabs & Include Demo Filter Chip */}
         <div className="p-3 sm:px-4 border-b border-[var(--border-subtle)] space-y-2.5 shrink-0">
           <div className="relative">
             <Search className="w-3.5 h-3.5 text-[var(--text-muted)] absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
@@ -206,6 +197,33 @@ export function FindPeopleModal({
               );
             })}
           </div>
+
+          {demoCount > 0 && (
+            <div className="flex items-center justify-between gap-2">
+              <button
+                type="button"
+                aria-pressed={includeDemo}
+                onClick={() => setIncludeDemo((v) => !v)}
+                className={`min-h-[30px] px-2.5 py-1 rounded-xl text-[11px] font-semibold inline-flex items-center gap-1.5 border transition-colors cursor-pointer ${
+                  includeDemo
+                    ? 'border-amber-400/60 bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-200'
+                    : 'border-[var(--border-subtle)] bg-[var(--bg-subtle)] text-[var(--text-muted)]'
+                }`}
+              >
+                <span
+                  className={`w-3.5 h-3.5 rounded flex items-center justify-center border ${
+                    includeDemo
+                      ? 'bg-amber-600 border-amber-600 text-white'
+                      : 'border-[var(--border-strong)] bg-transparent'
+                  }`}
+                >
+                  {includeDemo && <Check className="w-2.5 h-2.5" />}
+                </span>
+                <span>{t('demo.includeDemoChip')}</span>
+                <span className="opacity-75 tabular-nums">({formatNumber(demoCount)})</span>
+              </button>
+            </div>
+          )}
         </div>
 
         {/* People List */}
@@ -220,10 +238,14 @@ export function FindPeopleModal({
           ) : (
             filtered.map((entry) => {
               const isBlocked = blockedUids?.has(entry.uid) ?? false;
+              const isDemo = Boolean(entry.isDemo) || entry.uid.startsWith('demo_');
               const isRestaurant =
                 entry.role === 'restaurantOwner' || entry.role === 'donor';
-              const title = isRestaurant && entry.restaurantName ? entry.restaurantName : entry.displayName;
+              const title =
+                isRestaurant && entry.restaurantName ? entry.restaurantName : entry.displayName;
               const busy = openingUid === entry.uid;
+              const roleMeta = getRoleMeta(entry.role, t);
+              const bioLine = lang === 'bn' && entry.bioBn ? entry.bioBn : entry.bio;
 
               return (
                 <button
@@ -259,7 +281,13 @@ export function FindPeopleModal({
                           aria-label={t('common.verifiedDonor')}
                         />
                       )}
-                      {getRoleChip(entry.role)}
+                      {isDemo && <DemoBadge compact />}
+                      <span
+                        className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-bold shrink-0 ${roleMeta.className}`}
+                      >
+                        <RoleIcon role={entry.role} />
+                        {roleMeta.label}
+                      </span>
                       {isBlocked && (
                         <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md bg-red-100 dark:bg-red-950/60 text-red-700 dark:text-red-300 text-[10px] font-bold shrink-0">
                           <Ban className="w-2.5 h-2.5" />
@@ -272,28 +300,45 @@ export function FindPeopleModal({
                       <span className="font-mono text-[var(--brand-text)] truncate">
                         {entry.handle}
                       </span>
-                      {isRestaurant && entry.restaurantName && entry.displayName !== entry.restaurantName && (
-                        <>
-                          <span aria-hidden="true">·</span>
-                          <span className="truncate">{entry.displayName}</span>
-                        </>
-                      )}
                       <span aria-hidden="true">·</span>
                       <span className="inline-flex items-center gap-0.5 truncate text-[var(--text-muted)]">
                         <MapPin className="w-3 h-3 shrink-0" />
                         {formatArea(entry.area)}
                       </span>
+                      {typeof entry.rating === 'number' && entry.rating > 0 && (
+                        <>
+                          <span aria-hidden="true">·</span>
+                          <span className="inline-flex items-center gap-0.5 text-amber-600 dark:text-amber-400 font-semibold tabular-nums shrink-0">
+                            <Star className="w-3 h-3 fill-amber-500 text-amber-500" />
+                            {formatNumber(entry.rating.toFixed(1))}
+                          </span>
+                        </>
+                      )}
                     </div>
 
-                    <p
-                      className={`text-[10px] font-semibold ${
-                        entry.online
-                          ? 'text-emerald-600 dark:text-emerald-400'
-                          : 'text-[var(--text-muted)]'
-                      }`}
-                    >
-                      {formatLastSeen(entry)}
-                    </p>
+                    {bioLine && (
+                      <p className="text-[11px] text-[var(--text-muted)] line-clamp-1">
+                        {bioLine}
+                      </p>
+                    )}
+
+                    <div className="flex items-center gap-2 text-[10px]">
+                      <span
+                        className={`font-semibold ${
+                          entry.online
+                            ? 'text-emerald-600 dark:text-emerald-400'
+                            : 'text-[var(--text-muted)]'
+                        }`}
+                      >
+                        {formatLastSeen(entry)}
+                      </span>
+                      {entry.openingHours && (
+                        <span className="inline-flex items-center gap-0.5 text-[var(--text-muted)] truncate">
+                          <Clock className="w-2.5 h-2.5 shrink-0" />
+                          {entry.openingHours}
+                        </span>
+                      )}
+                    </div>
                   </div>
 
                   <span className="min-h-[34px] px-2.5 py-1 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-canvas)] text-[11px] font-semibold text-[var(--brand-text)] inline-flex items-center gap-1 whitespace-nowrap shrink-0">
