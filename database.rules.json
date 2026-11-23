@@ -1,0 +1,22 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "presence": {
+      ".read": "auth != null && auth.token.email_verified == true",
+      "$uid": {
+        ".write": "auth != null && auth.token.email_verified == true && auth.uid == $uid",
+        ".validate": "newData.hasChildren(['online', 'lastSeen']) && newData.child('online').isBoolean() && newData.child('lastSeen').isNumber()"
+      }
+    },
+    "typing": {
+      "$conversationId": {
+        "$uid": {
+          ".read": "auth != null && auth.token.email_verified == true",
+          ".write": "auth != null && auth.token.email_verified == true && auth.uid == $uid",
+          ".validate": "newData.isBoolean()"
+        }
+      }
+    }
+  }
+}

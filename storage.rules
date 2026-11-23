@@ -1,0 +1,48 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Deny everything by default
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+
+    function isSignedInVerified() {
+      return request.auth != null && request.auth.token.email_verified == true;
+    }
+
+    function isAllowedChatMediaType() {
+      return request.resource.contentType.matches('image/(jpeg|png|webp|gif)')
+        || request.resource.contentType.matches('audio/(webm|ogg|mp4|mpeg)')
+        || request.resource.contentType in [
+          'application/pdf',
+          'text/plain',
+          'application/msword',
+          'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+        ];
+    }
+
+    // Profile & Restaurant photos (max 5 MB, images only)
+    match /users/{userId}/profile/{fileName} {
+      allow read: if isSignedInVerified();
+      allow write: if isSignedInVerified()
+        && request.auth.uid == userId
+        && request.resource != null
+        && request.resource.size <= 5 * 1024 * 1024
+        && request.resource.contentType.matches('image/(jpeg|png|webp)');
+      allow delete: if isSignedInVerified() && request.auth.uid == userId;
+    }
+
+    // Chat media attachments (max 15 MB, restricted MIME types, sender-owned upload path)
+    match /chatMedia/{conversationId}/{senderId}/{fileName} {
+      allow read: if isSignedInVerified();
+      allow write: if isSignedInVerified()
+        && request.auth.uid == senderId
+        && request.resource != null
+        && request.resource.size > 0
+        && request.resource.size <= 15 * 1024 * 1024
+        && isAllowedChatMediaType();
+      allow delete: if isSignedInVerified() && request.auth.uid == senderId;
+    }
+  }
+}

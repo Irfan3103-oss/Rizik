@@ -1,0 +1,689 @@
+{
+  "entities": {
+    "RestaurantInfo": {
+      "title": "RestaurantInfo",
+      "description": "Restaurant owner onboarding metadata and admin verification status.",
+      "type": "object",
+      "properties": {
+        "restaurantName": { "type": "string", "minLength": 2, "maxLength": 120 },
+        "ownerName": { "type": "string", "minLength": 2, "maxLength": 100 },
+        "phone": { "type": "string", "minLength": 5, "maxLength": 32 },
+        "email": { "type": "string", "maxLength": 160 },
+        "address": { "type": "string", "minLength": 3, "maxLength": 240 },
+        "area": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "city": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "lat": { "type": "number" },
+        "lng": { "type": "number" },
+        "restaurantType": {
+          "type": "string",
+          "enum": ["restaurant", "bakery", "sweet_shop", "cafe", "catering", "hotel_kitchen", "other"]
+        },
+        "tradeLicenseNumber": { "type": "string", "maxLength": 80 },
+        "restaurantPhotoUrl": { "type": "string", "maxLength": 250000 },
+        "licensePhotoUrl": { "type": "string", "maxLength": 250000 },
+        "openingHours": { "type": "string", "minLength": 2, "maxLength": 80 },
+        "approxDailySurplus": { "type": "string", "maxLength": 100 },
+        "acceptedSafetyTerms": { "type": "boolean" },
+        "verificationStatus": {
+          "type": "string",
+          "enum": ["pending", "approved", "rejected"]
+        },
+        "rejectionReason": { "type": "string", "maxLength": 500 },
+        "submittedAt": { "type": "string", "maxLength": 64 },
+        "reviewedAt": { "type": "string", "maxLength": 64 },
+        "reviewedBy": { "type": "string", "maxLength": 128 }
+      },
+      "required": [
+        "restaurantName",
+        "ownerName",
+        "phone",
+        "address",
+        "area",
+        "city",
+        "lat",
+        "lng",
+        "restaurantType",
+        "openingHours",
+        "acceptedSafetyTerms",
+        "verificationStatus"
+      ]
+    },
+    "UserPublic": {
+      "title": "UserPublic",
+      "description": "User profile, role, preferences, and optional restaurant application details.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "maxLength": 128
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "handle": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 40
+        },
+        "photoURL": {
+          "type": "string",
+          "maxLength": 250000
+        },
+        "email": {
+          "type": "string",
+          "maxLength": 160
+        },
+        "role": {
+          "type": "string",
+          "enum": ["user", "restaurantOwner", "recipient", "donor"]
+        },
+        "area": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "organizationName": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "businessName": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "hours": {
+          "type": "string",
+          "maxLength": 80
+        },
+        "verified": {
+          "type": "boolean"
+        },
+        "discoverable": {
+          "type": "boolean"
+        },
+        "starterSeeded": {
+          "type": "boolean"
+        },
+        "notificationsSeeded": {
+          "type": "boolean"
+        },
+        "language": {
+          "type": "string",
+          "enum": ["en", "bn"]
+        },
+        "savedRadiusKm": {
+          "type": "number"
+        },
+        "restaurant": {
+          "$ref": "#/entities/RestaurantInfo"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "uid",
+        "displayName",
+        "role",
+        "area",
+        "verified",
+        "language",
+        "savedRadiusKm",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "UserDirectoryProfile": {
+      "title": "UserDirectoryProfile",
+      "description": "Zero-PII public profile projection used by Find People directory and Messenger chat headers.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "maxLength": 128
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "handle": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 40
+        },
+        "photoURL": {
+          "type": "string",
+          "maxLength": 250000
+        },
+        "role": {
+          "type": "string",
+          "enum": ["user", "restaurantOwner", "recipient", "donor", "admin"]
+        },
+        "restaurantName": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "restaurantType": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "area": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "verified": {
+          "type": "boolean"
+        },
+        "discoverable": {
+          "type": "boolean"
+        },
+        "online": {
+          "type": "boolean"
+        },
+        "lastSeen": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "uid",
+        "displayName",
+        "handle",
+        "role",
+        "area",
+        "verified",
+        "discoverable",
+        "online",
+        "lastSeen",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "UserPrivate": {
+      "title": "UserPrivate",
+      "description": "Isolated PII record (email, phone, street address) readable and writable strictly by the owner or admin.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "maxLength": 128
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "maxLength": 160
+        },
+        "phone": {
+          "type": "string",
+          "maxLength": 32
+        },
+        "address": {
+          "type": "string",
+          "maxLength": 240
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "email", "updatedAt"]
+    },
+    "UserBlock": {
+      "title": "UserBlock",
+      "description": "Per-user block record preventing blocked users from messaging each other.",
+      "type": "object",
+      "properties": {
+        "blockerUid": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "maxLength": 128
+        },
+        "blockedUid": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "maxLength": 128
+        },
+        "blockedName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "blockedHandle": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["blockerUid", "blockedUid", "blockedName", "createdAt"]
+    },
+    "UserNotification": {
+      "title": "UserNotification",
+      "description": "Personal real-time notification in a user's notification center.",
+      "type": "object",
+      "properties": {
+        "recipientUid": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "maxLength": 128
+        },
+        "senderUid": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "maxLength": 128
+        },
+        "senderName": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "welcome",
+            "complete_profile",
+            "flash_rescue",
+            "flash_near_you",
+            "events_upcoming",
+            "team_hello",
+            "new_message",
+            "new_conversation",
+            "reply",
+            "claim_accepted",
+            "claim_request",
+            "pickup_completed",
+            "restaurant_status",
+            "system"
+          ]
+        },
+        "title": { "type": "string", "minLength": 1, "maxLength": 140 },
+        "titleBn": { "type": "string", "maxLength": 180 },
+        "body": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "bodyBn": { "type": "string", "maxLength": 600 },
+        "read": { "type": "boolean" },
+        "isStarter": { "type": "boolean" },
+        "conversationId": { "type": "string", "maxLength": 128 },
+        "listingId": { "type": "string", "maxLength": 128 },
+        "claimId": { "type": "string", "maxLength": 128 },
+        "linkTab": {
+          "type": "string",
+          "enum": ["discover", "inbox", "claims", "events", "donate", "account", "post", "donor", "admin"]
+        },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["recipientUid", "senderUid", "type", "title", "body", "read", "createdAt", "updatedAt"]
+    },
+    "UserReport": {
+      "title": "UserReport",
+      "description": "Safety or abuse report filed by an authenticated user against another user or conversation.",
+      "type": "object",
+      "properties": {
+        "reporterId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "targetUserId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "targetName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "conversationId": { "type": "string", "maxLength": 128 },
+        "reason": { "type": "string", "minLength": 2, "maxLength": 120 },
+        "details": { "type": "string", "maxLength": 1000 },
+        "status": { "type": "string", "enum": ["open", "reviewed", "resolved"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["reporterId", "targetUserId", "targetName", "reason", "status", "createdAt", "updatedAt"]
+    },
+    "FoodListing": {
+      "title": "FoodListing",
+      "description": "Surplus food rescue batch posted by a verified donor kitchen.",
+      "type": "object",
+      "properties": {
+        "donorId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "donorName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "donorVerified": { "type": "boolean" },
+        "donorArea": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "title": { "type": "string", "minLength": 2, "maxLength": 140 },
+        "description": { "type": "string", "maxLength": 1000 },
+        "category": { "type": "string", "enum": ["cooked", "bakery", "produce", "packaged"] },
+        "dietaryTags": { "type": "array" },
+        "quantity": { "type": "number" },
+        "remainingQuantity": { "type": "number" },
+        "unit": { "type": "string", "minLength": 1, "maxLength": 32 },
+        "pickupStart": { "type": "string", "maxLength": 64 },
+        "pickupEnd": { "type": "string", "maxLength": 64 },
+        "pickupAddress": { "type": "string", "minLength": 2, "maxLength": 240 },
+        "safetyNote": { "type": "string", "maxLength": 400 },
+        "preparedAt": { "type": "string", "maxLength": 64 },
+        "consumeWithinHours": { "type": "number" },
+        "storageMethod": { "type": "string", "enum": ["covered_hot", "covered_chilled", "sealed_dry", "room_temp"] },
+        "isFlashRescue": { "type": "boolean" },
+        "isRamadanSpecial": { "type": "boolean" },
+        "status": { "type": "string", "enum": ["active", "paused", "claimed", "expired"] },
+        "lat": { "type": "number" },
+        "lng": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "donorId", "donorName", "donorVerified", "donorArea", "title", "category",
+        "quantity", "remainingQuantity", "unit", "pickupStart", "pickupEnd",
+        "pickupAddress", "status", "createdAt", "updatedAt"
+      ]
+    },
+    "FoodClaim": {
+      "title": "FoodClaim",
+      "description": "Recipient reservation and QR/code handover record for a surplus food listing.",
+      "type": "object",
+      "properties": {
+        "listingId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "donorId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "recipientId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "recipientName": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "donorBusinessName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "listingTitle": { "type": "string", "minLength": 1, "maxLength": 140 },
+        "quantityClaimed": { "type": "number" },
+        "status": { "type": "string", "enum": ["requested", "accepted", "picked_up", "completed", "cancelled", "expired"] },
+        "pickupCode": { "type": "string", "minLength": 6, "maxLength": 12 },
+        "handoverMethod": { "type": "string", "enum": ["qr", "manual"] },
+        "notes": { "type": "string", "maxLength": 400 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "listingId", "donorId", "recipientId", "recipientName", "donorBusinessName",
+        "listingTitle", "quantityClaimed", "status", "pickupCode", "createdAt", "updatedAt"
+      ]
+    },
+    "DonorReview": {
+      "title": "DonorReview",
+      "description": "Verified hygiene and star rating submitted by a recipient after pickup completion.",
+      "type": "object",
+      "properties": {
+        "claimId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "donorId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "reviewerId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "reviewerName": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "rating": { "type": "number" },
+        "hygieneOk": { "type": "boolean" },
+        "comment": { "type": "string", "maxLength": 500 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["claimId", "donorId", "reviewerId", "reviewerName", "rating", "hygieneOk", "createdAt"]
+    },
+    "MonetaryDonation": {
+      "title": "MonetaryDonation",
+      "description": "Monetary support record (General, Events, Iftar Packs, Sadaqah, Zakat) with receipt code.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "donorDisplayName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "amountBdt": { "type": "number" },
+        "frequency": { "type": "string", "enum": ["one_time", "monthly"] },
+        "cause": { "type": "string", "enum": ["general", "events", "wedding_pickup", "platform", "iftar_packs", "sadaqah", "zakat"] },
+        "paymentMethod": { "type": "string", "enum": ["bkash", "nagad", "rocket", "card_sandbox", "bank_transfer"] },
+        "isAnonymous": { "type": "boolean" },
+        "honorOf": { "type": "string", "maxLength": 140 },
+        "receiptCode": { "type": "string", "minLength": 4, "maxLength": 40 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "donorDisplayName", "amountBdt", "frequency", "cause", "paymentMethod", "isAnonymous", "receiptCode", "createdAt"]
+    },
+    "VolunteerShiftSignup": {
+      "title": "VolunteerShiftSignup",
+      "description": "Volunteer shift reservation, check-in, and completed hours record.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "shiftId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "userName": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "status": { "type": "string", "enum": ["signed_up", "checked_in", "completed", "cancelled"] },
+        "hoursLogged": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "shiftId", "userName", "status", "hoursLogged", "createdAt", "updatedAt"]
+    },
+    "ChatConversation": {
+      "title": "ChatConversation",
+      "description": "Deterministic 1-to-1 Messenger, pickup coordination, or starter demo conversation.",
+      "type": "object",
+      "properties": {
+        "conversationKind": { "type": "string", "enum": ["direct", "pickup", "demo"] },
+        "participants": { "type": "array" },
+        "uidA": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "uidB": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "donorId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "recipientId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "listingId": { "type": "string", "maxLength": 128 },
+        "donorName": { "type": "string", "maxLength": 120 },
+        "recipientName": { "type": "string", "maxLength": 120 },
+        "listingTitle": { "type": "string", "maxLength": 140 },
+        "participantProfiles": { "type": "object" },
+        "isDemo": { "type": "boolean" },
+        "demoShopKey": { "type": "string", "enum": ["team", "biryani", "mishti", "bakery"] },
+        "demoOwnerUid": { "type": "string", "maxLength": 128 },
+        "lastMessage": { "type": "string", "maxLength": 500 },
+        "lastMessageType": { "type": "string", "enum": ["text", "image", "file", "location", "audio", "call_log", "system"] },
+        "lastMessageSenderId": { "type": "string", "maxLength": 128 },
+        "lastMessageAt": { "type": "string", "format": "date-time" },
+        "unreadCount": { "type": "object" },
+        "mutedBy": { "type": "object" },
+        "archivedBy": { "type": "object" },
+        "deletedFor": { "type": "object" },
+        "typingBy": { "type": "object" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["participants", "uidA", "uidB", "lastMessage", "lastMessageType", "lastMessageAt", "unreadCount", "createdAt", "updatedAt"]
+    },
+    "ChatMessage": {
+      "title": "ChatMessage",
+      "description": "Real-time Messenger message supporting media, files, live location, replies, receipts, forwarding, and per-user deletion.",
+      "type": "object",
+      "properties": {
+        "conversationId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "participants": { "type": "array" },
+        "donorId": { "type": "string", "maxLength": 128 },
+        "recipientId": { "type": "string", "maxLength": 128 },
+        "senderId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "senderName": { "type": "string", "maxLength": 100 },
+        "text": { "type": "string", "maxLength": 2000 },
+        "messageType": { "type": "string", "enum": ["text", "image", "file", "location", "audio", "call_log", "system"] },
+        "mediaUrl": { "type": "string", "maxLength": 450000 },
+        "fileName": { "type": "string", "maxLength": 160 },
+        "fileSize": { "type": "number" },
+        "fileMime": { "type": "string", "maxLength": 100 },
+        "locationLat": { "type": "number" },
+        "locationLng": { "type": "number" },
+        "locationLabel": { "type": "string", "maxLength": 160 },
+        "locationExpiresAt": { "type": "string", "maxLength": 64 },
+        "durationSec": { "type": "number" },
+        "replyToId": { "type": "string", "maxLength": 128 },
+        "replyToText": { "type": "string", "maxLength": 200 },
+        "forwardedFrom": { "type": "string", "maxLength": 120 },
+        "deliveredTo": { "type": "array" },
+        "readBy": { "type": "array" },
+        "deletedFor": { "type": "array" },
+        "reactions": { "type": "object" },
+        "status": { "type": "string", "enum": ["sent", "delivered", "read"] },
+        "readAt": { "type": "string", "format": "date-time" },
+        "isDemoAutoReply": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["conversationId", "participants", "senderId", "text", "messageType", "createdAt"]
+    },
+    "AdminRegistry": {
+      "title": "AdminRegistry",
+      "description": "Console-managed registry of admin UIDs (non-writable from client).",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "role": { "type": "string", "enum": ["admin"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid"]
+    },
+    "AdminNotification": {
+      "title": "AdminNotification",
+      "description": "Real-time admin alerts for new restaurant applications and incoming owner messages.",
+      "type": "object",
+      "properties": {
+        "type": { "type": "string", "enum": ["newRestaurantOwner", "resubmittedRestaurantOwner", "newOwnerMessage"] },
+        "ownerUid": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "restaurantName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "ownerName": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "conversationId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "messagePreview": { "type": "string", "maxLength": 240 },
+        "read": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["type", "ownerUid", "restaurantName", "ownerName", "read", "createdAt", "updatedAt"]
+    },
+    "AdminConversation": {
+      "title": "AdminConversation",
+      "description": "Direct two-party onboarding & support thread between Ahar For All team and a restaurant owner.",
+      "type": "object",
+      "properties": {
+        "ownerUid": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "ownerName": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "restaurantName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "restaurantLogoUrl": { "type": "string", "maxLength": 250000 },
+        "verificationStatus": { "type": "string", "enum": ["pending", "approved", "rejected"] },
+        "lastMessage": { "type": "string", "maxLength": 500 },
+        "lastMessageType": { "type": "string", "enum": ["text", "image", "file", "system"] },
+        "lastSenderRole": { "type": "string", "enum": ["owner", "admin", "system"] },
+        "lastMessageAt": { "type": "string", "format": "date-time" },
+        "ownerUnreadCount": { "type": "number" },
+        "adminUnreadCount": { "type": "number" },
+        "ownerTyping": { "type": "boolean" },
+        "adminTyping": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "ownerUid", "ownerName", "restaurantName", "verificationStatus",
+        "lastMessage", "lastMessageType", "lastSenderRole", "lastMessageAt",
+        "ownerUnreadCount", "adminUnreadCount", "createdAt", "updatedAt"
+      ]
+    },
+    "AdminChatMessage": {
+      "title": "AdminChatMessage",
+      "description": "Real-time message inside an Admin <-> Restaurant Owner conversation.",
+      "type": "object",
+      "properties": {
+        "conversationId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "ownerUid": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "senderId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "senderRole": { "type": "string", "enum": ["owner", "admin", "system"] },
+        "senderName": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "text": { "type": "string", "maxLength": 2000 },
+        "messageType": { "type": "string", "enum": ["text", "image", "file", "system"] },
+        "mediaUrl": { "type": "string", "maxLength": 450000 },
+        "fileName": { "type": "string", "maxLength": 160 },
+        "fileSize": { "type": "number" },
+        "fileMime": { "type": "string", "maxLength": 100 },
+        "status": { "type": "string", "enum": ["sent", "read"] },
+        "readAt": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "conversationId", "ownerUid", "senderId", "senderRole", "senderName",
+        "text", "messageType", "status", "createdAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/admins/{adminId}": {
+      "schema": { "$ref": "#/entities/AdminRegistry" },
+      "description": "Admin UIDs editable strictly in Firebase Console."
+    },
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserPublic" },
+      "description": "User profile, role preferences, and restaurant onboarding info."
+    },
+    "/users/{userId}/private/{docId}": {
+      "schema": { "$ref": "#/entities/UserPrivate" },
+      "description": "Strictly isolated user PII (email, phone, street address)."
+    },
+    "/users/{userId}/blocked/{targetId}": {
+      "schema": { "$ref": "#/entities/UserBlock" },
+      "description": "Per-user block list preventing blocked users from messaging each other."
+    },
+    "/users/{userId}/notifications/{notificationId}": {
+      "schema": { "$ref": "#/entities/UserNotification" },
+      "description": "Per-user real-time notifications inbox including starter notifications."
+    },
+    "/userDirectory/{userId}": {
+      "schema": { "$ref": "#/entities/UserDirectoryProfile" },
+      "description": "Zero-PII public user directory used by Find People & presence status."
+    },
+    "/reports/{reportId}": {
+      "schema": { "$ref": "#/entities/UserReport" },
+      "description": "User & conversation abuse reports moderated by admins."
+    },
+    "/adminNotifications/{notificationId}": {
+      "schema": { "$ref": "#/entities/AdminNotification" },
+      "description": "Admin inbox notifications for new restaurant applications and owner chat messages."
+    },
+    "/adminConversations/{conversationId}": {
+      "schema": { "$ref": "#/entities/AdminConversation" },
+      "description": "Direct onboarding/verification chat conversations between admin and restaurant owners."
+    },
+    "/adminConversations/{conversationId}/messages/{messageId}": {
+      "schema": { "$ref": "#/entities/AdminChatMessage" },
+      "description": "Real-time chat messages inside an admin-owner conversation."
+    },
+    "/listings/{listingId}": {
+      "schema": { "$ref": "#/entities/FoodListing" },
+      "description": "Active and historical surplus food listings posted by verified donors."
+    },
+    "/claims/{claimId}": {
+      "schema": { "$ref": "#/entities/FoodClaim" },
+      "description": "Food rescue reservations and QR/manual handover records."
+    },
+    "/reviews/{reviewId}": {
+      "schema": { "$ref": "#/entities/DonorReview" },
+      "description": "Verified donor pickup ratings and hygiene confirmations."
+    },
+    "/donations/{donationId}": {
+      "schema": { "$ref": "#/entities/MonetaryDonation" },
+      "description": "Monetary donations supporting food rescue, Iftar packs, Sadaqah, and Zakat."
+    },
+    "/shiftSignups/{signupId}": {
+      "schema": { "$ref": "#/entities/VolunteerShiftSignup" },
+      "description": "Volunteer shift signups and logged hours."
+    },
+    "/conversations/{conversationId}": {
+      "schema": { "$ref": "#/entities/ChatConversation" },
+      "description": "Messenger 1-to-1, pickup coordination, and starter demo conversations."
+    },
+    "/conversations/{conversationId}/messages/{messageId}": {
+      "schema": { "$ref": "#/entities/ChatMessage" },
+      "description": "Messages inside a conversation, master-gated by parent participants and block status."
+    }
+  }
+}
