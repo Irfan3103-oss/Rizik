@@ -36,6 +36,7 @@ const BLOCKED_ADMIN_EMAIL = 'sheikhsahel513@gmail.com';
 
 const PORT = Number(process.env.PORT) || 3000;
 const DAILY_CLAIM_LIMIT = 3;
+const EXPOSE_DEV_OTP = process.env.EXPOSE_DEV_OTP === 'true';
 const UPLOADS_DIR = path.join(DATA_DIR, 'uploads');
 if (!fs.existsSync(UPLOADS_DIR)) {
   fs.mkdirSync(UPLOADS_DIR, { recursive: true });
@@ -602,7 +603,7 @@ async function startServer() {
        ON CONFLICT(identifier) DO UPDATE SET code = excluded.code, expires_at = excluded.expires_at`
     ).run(identifier, code, expiresAt);
 
-    res.json({ message: 'Verification code sent.', devOtpHint: code });
+    res.json({ message: 'Verification code sent.', ...(EXPOSE_DEV_OTP ? { devOtpHint: code } : {}) });
   });
 
   app.post('/api/auth/reset-password', (req, res) => {
@@ -659,10 +660,11 @@ async function startServer() {
        ON CONFLICT(identifier) DO UPDATE SET code = excluded.code, expires_at = excluded.expires_at`
     ).run(identifier, code, expiresAt);
 
-    // Expose devOtpHint so evaluators can complete OTP verification seamlessly without SMS/email delivery
+    // devOtpHint lets evaluators finish OTP without SMS/email delivery. Only when EXPOSE_DEV_OTP=true:
+    // anyone who knows an email/phone could otherwise take over that account.
     res.json({
       message: 'Verification code sent.',
-      devOtpHint: code,
+      ...(EXPOSE_DEV_OTP ? { devOtpHint: code } : {}),
     });
   });
 
