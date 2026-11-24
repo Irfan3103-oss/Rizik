@@ -732,7 +732,7 @@ class CommunityRoomsService {
         },
         onError: (e, st) {
           final parsed = parseFirestoreListenerError(e, 'LIST', 'rooms');
-          onError?.(parsed);
+          onError?.call(parsed);
           if (!controller.isClosed) controller.addError(parsed, st);
         },
       );
@@ -757,7 +757,7 @@ class CommunityRoomsService {
               attachFallback();
               return;
             }
-            onError?.(parsed);
+            onError?.call(parsed);
             if (!controller.isClosed) controller.addError(parsed, st);
           },
         );
@@ -846,7 +846,7 @@ class CommunityRoomsService {
             'LIST',
             'rooms/$safeRoomId/messages',
           );
-          onError?.(parsed);
+          onError?.call(parsed);
           if (!controller.isClosed) controller.addError(parsed, st);
         },
       );
@@ -881,7 +881,7 @@ class CommunityRoomsService {
               attachFallback();
               return;
             }
-            onError?.(parsed);
+            onError?.call(parsed);
             if (!controller.isClosed) controller.addError(parsed, st);
           },
         );
@@ -930,7 +930,7 @@ class CommunityRoomsService {
         'LIST',
         'rooms/$safeRoomId/members',
       );
-      onError?.(parsed);
+      onError?.call(parsed);
       throw parsed;
     });
   }

@@ -1147,12 +1147,15 @@ class FirestoreService {
       id: id,
       donorDisplayName: displayName,
       amountBdt: safeAmt,
-      frequency: frequency == 'monthly' ? 'monthly' : 'one_time',
-      cause: cause,
-      paymentMethod: paymentMethod,
+      frequency: frequency == 'monthly'
+          ? DonationFrequency.monthly
+          : DonationFrequency.oneTime,
+      cause: donationCauseFromWire(cause),
+      paymentMethod: paymentMethodFromWire(paymentMethod),
       isAnonymous: isAnonymous,
       honorOf: safeHonor.isNotEmpty ? safeHonor : null,
       receiptCode: receiptCode,
+      status: 'completed',
       createdAt: DateTime.now().toIso8601String(),
     );
   }
