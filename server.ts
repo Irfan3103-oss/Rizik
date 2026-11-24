@@ -17,6 +17,7 @@ import {
   verifyPassword,
   haversineKm,
   runAutoExpirySweep,
+  refreshDemoListingsIfEmpty,
 } from './server/db.ts';
 import type { ClaimStatus, FoodCategory, ListingStatus, User, VolunteerRole } from './src/types.ts';
 
@@ -424,6 +425,7 @@ async function startServer() {
   // Periodic background sweep every 30s to expire old listings & no-shows
   setInterval(() => {
     const expiredIds = runAutoExpirySweep();
+    if (process.env.DEMO_MODE === 'true') refreshDemoListingsIfEmpty();
     if (expiredIds.length > 0) {
       for (const sockets of wsClients.values()) {
         const msg = JSON.stringify({ event: 'listing:expired', data: { listingIds: expiredIds } });

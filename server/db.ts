@@ -570,6 +570,12 @@ export function initDatabase() {
   ensureExtendedCommunityData();
 
   // Keep seeded demo listings fresh across restarts if all demo batches expired from an earlier session
+  refreshDemoListingsIfEmpty();
+}
+
+// Re-activates the seeded demo listings when no food is active. Runs at startup, and periodically
+// when DEMO_MODE=true so a long-running hosted demo never runs out of food.
+export function refreshDemoListingsIfEmpty() {
   const nowIso = new Date().toISOString();
   const activeListingCount = (
     db
