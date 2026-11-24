@@ -174,7 +174,6 @@ async function verifyFirebaseIdToken(idToken: string): Promise<User | null> {
       typeof payload.iat !== 'number' ||
       payload.iat > nowSec + 300 ||
       (typeof payload.auth_time === 'number' && payload.auth_time > nowSec + 300) ||
-      payload.email_verified !== true ||
       typeof payload.email !== 'string' ||
       !payload.email.trim()
     ) {

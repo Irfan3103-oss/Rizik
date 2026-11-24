@@ -25,6 +25,11 @@ service cloud.firestore {
       return isSignedIn() && request.auth.token.email_verified == true;
     }
 
+    // Any authenticated user (email verified or not) — used for chat/directory access
+    function isAuthUser() {
+      return isSignedIn();
+    }
+
     function isValidId(id) {
       return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
     }
@@ -41,6 +46,11 @@ service cloud.firestore {
 
     function isOwner(userId) {
       return isVerifiedUser() && request.auth.uid == userId;
+    }
+
+    // Owner check without email verification requirement (for profile creation on first sign-in)
+    function isAuthOwner(userId) {
+      return isAuthUser() && request.auth.uid == userId;
     }
 
     function isBlockedBetween(uid1, uid2) {
@@ -591,7 +601,7 @@ service cloud.firestore {
     }
 
     function isConversationParticipant(conversationId) {
-      return isVerifiedUser()
+      return isAuthUser()
         && exists(/databases/$(database)/documents/conversations/$(conversationId))
         && (
           request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.participants ||
@@ -675,7 +685,7 @@ service cloud.firestore {
     }
 
     function isAdminConvParticipant(conversationId) {
-      return isVerifiedUser()
+      return isAuthUser()
         && exists(/databases/$(database)/documents/adminConversations/$(conversationId))
         && (
           isAdmin() ||
@@ -696,10 +706,10 @@ service cloud.firestore {
 
     // --- Zero-PII Public User Directory (Real Users + Admin-Seeded Demo Personas) ---
     match /userDirectory/{userId} {
-      allow get: if isValidId(userId) && isVerifiedUser() && (
+      allow get: if isValidId(userId) && isAuthUser() && (
         existing().discoverable == true || isOwner(userId) || isAdmin()
       );
-      allow list: if isVerifiedUser() && (
+      allow list: if isAuthUser() && (
         resource.data.discoverable == true ||
         resource.data.uid == request.auth.uid ||
         isAdmin()
@@ -712,7 +722,8 @@ service cloud.firestore {
         && incoming().lastSeen == request.time
         && (
           isAdmin() || (
-            isOwner(userId)
+            isAuthUser()
+            && incoming().uid == request.auth.uid
             && incoming().role in ['user', 'restaurantOwner', 'recipient', 'donor', 'volunteer', 'ngo', 'organizer']
             && (!('isDemo' in incoming()) || incoming().isDemo == false)
             && (incoming().verified == false || userDocVerifiedStatus(userId))
@@ -725,7 +736,8 @@ service cloud.firestore {
         && incoming().updatedAt == request.time
         && (
           isAdmin() || (
-            isOwner(userId)
+            isAuthUser()
+            && request.auth.uid == userId
             && (!('isDemo' in existing()) || existing().isDemo == false)
             && (!('isDemo' in incoming()) || incoming().isDemo == false)
             && incoming().role == existing().role
@@ -741,9 +753,10 @@ service cloud.firestore {
 
     // --- User Profiles, Blocked List, Notifications, Isolated Demo Chats & Restaurant Applications ---
     match /users/{userId} {
-      allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
-      allow list: if isVerifiedUser() && (resource.data.uid == request.auth.uid || isAdmin());
-      allow create: if isOwner(userId)
+      allow get: if isValidId(userId) && (isAuthOwner(userId) || isAdmin());
+      allow list: if isAuthUser() && (resource.data.uid == request.auth.uid || isAdmin());
+      allow create: if isAuthUser()
+        && isAuthOwner(userId)
         && isValidId(userId)
         && isValidUserPublic(incoming())
         && incoming().uid == request.auth.uid
@@ -767,7 +780,7 @@ service cloud.firestore {
         && incoming().updatedAt == request.time
         && (
           isAdmin() || (
-            isOwner(userId)
+            isAuthOwner(userId)
             && incoming().role == existing().role
             && incoming().verified == existing().verified
             && (
@@ -802,15 +815,15 @@ service cloud.firestore {
 
       // Isolated PII Subcollection
       match /private/{docId} {
-        allow get: if isValidId(docId) && (isOwner(userId) || isAdmin());
-        allow list: if isOwner(userId) || isAdmin();
+        allow get: if isValidId(docId) && (isAuthOwner(userId) || isAdmin());
+        allow list: if isAuthOwner(userId) || isAdmin();
         allow create: if isValidId(docId)
-          && (isOwner(userId) || isAdmin())
+          && (isAuthOwner(userId) || isAdmin())
           && isValidUserPrivate(incoming())
           && incoming().uid == userId
           && incoming().updatedAt == request.time;
         allow update: if isValidId(docId)
-          && (isOwner(userId) || isAdmin())
+          && (isAuthOwner(userId) || isAdmin())
           && isValidUserPrivate(incoming())
           && incoming().uid == existing().uid
           && incoming().updatedAt == request.time
@@ -820,23 +833,23 @@ service cloud.firestore {
 
       // Per-user Block List
       match /blocked/{targetId} {
-        allow get: if isValidId(targetId) && (isOwner(userId) || isAdmin());
-        allow list: if isOwner(userId) || isAdmin();
-        allow create: if isOwner(userId)
+        allow get: if isValidId(targetId) && (isAuthOwner(userId) || isAdmin());
+        allow list: if isAuthOwner(userId) || isAdmin();
+        allow create: if isAuthOwner(userId)
           && isValidId(targetId)
           && isValidUserBlock(incoming())
           && incoming().blockerUid == userId
           && incoming().blockedUid == targetId
           && incoming().createdAt == request.time;
         allow update: if false;
-        allow delete: if isValidId(targetId) && (isOwner(userId) || isAdmin());
+        allow delete: if isValidId(targetId) && (isAuthOwner(userId) || isAdmin());
       }
 
       // Personal Notifications Center
       match /notifications/{notificationId} {
         allow get: if isValidId(notificationId) && (isOwner(userId) || isAdmin());
         allow list: if isOwner(userId) || isAdmin();
-        allow create: if isVerifiedUser()
+        allow create: if isAuthUser()
           && isValidId(notificationId)
           && isValidUserNotification(incoming())
           && incoming().recipientUid == userId
@@ -845,7 +858,7 @@ service cloud.firestore {
           && (
             isAdmin() ||
             (
-              isOwner(userId)
+              isAuthOwner(userId)
               && incoming().senderUid == request.auth.uid
               && incoming().type in ['welcome', 'complete_profile', 'flash_rescue', 'events_upcoming', 'team_hello']
             ) ||
@@ -897,29 +910,29 @@ service cloud.firestore {
 
       // Isolated Client-Side Demo Persona 1-to-1 Conversations (Strictly Owner-Only)
       match /demoConversations/{convId} {
-        allow get: if isValidId(convId) && isOwner(userId);
-        allow list: if isOwner(userId);
+        allow get: if isValidId(convId) && isAuthOwner(userId);
+        allow list: if isAuthOwner(userId);
         allow create: if isValidId(convId)
-          && isOwner(userId)
+          && isAuthOwner(userId)
           && isValidDemoConversation(incoming())
           && incoming().createdAt == request.time
           && incoming().updatedAt == request.time
           && incoming().lastMessageAt == request.time;
         allow update: if isValidId(convId)
-          && isOwner(userId)
+          && isAuthOwner(userId)
           && isValidDemoConversation(incoming())
           && incoming().personaId == existing().personaId
           && incoming().createdAt == existing().createdAt
           && incoming().updatedAt == request.time;
-        allow delete: if isValidId(convId) && isOwner(userId);
+        allow delete: if isValidId(convId) && isAuthOwner(userId);
       }
 
       // Isolated Client-Side Demo Persona Messages (Strictly Owner-Only)
       match /demoMessages/{msgId} {
-        allow get: if isValidId(msgId) && isOwner(userId);
-        allow list: if isOwner(userId);
+        allow get: if isValidId(msgId) && isAuthOwner(userId);
+        allow list: if isAuthOwner(userId);
         allow create: if isValidId(msgId)
-          && isOwner(userId)
+          && isAuthOwner(userId)
           && isValidDemoMessage(incoming())
           && (
             incoming().senderId == request.auth.uid ||
@@ -927,7 +940,7 @@ service cloud.firestore {
           )
           && incoming().createdAt == request.time;
         allow update: if isValidId(msgId)
-          && isOwner(userId)
+          && isAuthOwner(userId)
           && isValidDemoMessage(incoming())
           && incoming().conversationId == existing().conversationId
           && incoming().personaId == existing().personaId
@@ -935,21 +948,21 @@ service cloud.firestore {
           && incoming().text == existing().text
           && incoming().createdAt == existing().createdAt
           && incoming().diff(existing()).affectedKeys().hasOnly(['reactions']);
-        allow delete: if isValidId(msgId) && isOwner(userId);
+        allow delete: if isValidId(msgId) && isAuthOwner(userId);
       }
     }
 
     // --- Rizik Community Group Chat Rooms ---
     match /rooms/{roomId} {
-      allow get: if isValidId(roomId) && isVerifiedUser();
-      allow list: if isVerifiedUser();
+      allow get: if isValidId(roomId) && isAuthUser();
+      allow list: if isAuthUser();
       allow create: if isValidId(roomId)
         && isAdmin()
         && isValidCommunityRoom(incoming())
         && incoming().createdAt == request.time
         && incoming().updatedAt == request.time;
       allow update: if isValidId(roomId)
-        && isVerifiedUser()
+        && isAuthUser()
         && isValidCommunityRoom(incoming())
         && incoming().slug == existing().slug
         && incoming().createdAt == existing().createdAt
@@ -967,8 +980,8 @@ service cloud.firestore {
       allow delete: if isValidId(roomId) && isAdmin();
 
       match /members/{memberId} {
-        allow get: if isValidId(roomId) && isValidId(memberId) && isVerifiedUser();
-        allow list: if isValidId(roomId) && isVerifiedUser();
+        allow get: if isValidId(roomId) && isValidId(memberId) && isAuthUser();
+        allow list: if isValidId(roomId) && isAuthUser();
         allow create, update: if isValidId(roomId)
           && isValidId(memberId)
           && (isOwner(memberId) || isAdmin())
@@ -979,11 +992,11 @@ service cloud.firestore {
       }
 
       match /messages/{messageId} {
-        allow get: if isValidId(roomId) && isValidId(messageId) && isVerifiedUser();
-        allow list: if isValidId(roomId) && isVerifiedUser();
+        allow get: if isValidId(roomId) && isValidId(messageId) && isAuthUser();
+        allow list: if isValidId(roomId) && isAuthUser();
         allow create: if isValidId(roomId)
           && isValidId(messageId)
-          && isVerifiedUser()
+          && isAuthUser()
           && isValidRoomMessage(incoming())
           && incoming().roomId == roomId
           && incoming().text.size() <= 2000
@@ -1007,7 +1020,7 @@ service cloud.firestore {
           );
         allow update: if isValidId(roomId)
           && isValidId(messageId)
-          && isVerifiedUser()
+          && isAuthUser()
           && isValidRoomMessage(incoming())
           && incoming().roomId == existing().roomId
           && incoming().senderId == existing().senderId
@@ -1024,7 +1037,7 @@ service cloud.firestore {
           );
         allow delete: if isValidId(roomId) && isValidId(messageId) && (
           isAdmin() || (
-            isVerifiedUser()
+            isAuthUser()
             && existing().senderId == request.auth.uid
             && existing().senderIsDemo == false
           )
@@ -1035,10 +1048,10 @@ service cloud.firestore {
     // --- User & Abuse Reports ---
     match /reports/{reportId} {
       allow get: if isValidId(reportId) && (
-        isAdmin() || (isVerifiedUser() && existing().reporterId == request.auth.uid)
+        isAdmin() || (isAuthUser() && existing().reporterId == request.auth.uid)
       );
-      allow list: if isAdmin() || (isVerifiedUser() && resource.data.reporterId == request.auth.uid);
-      allow create: if isVerifiedUser()
+      allow list: if isAdmin() || (isAuthUser() && resource.data.reporterId == request.auth.uid);
+      allow create: if isAuthUser()
         && isValidId(reportId)
         && isValidUserReport(incoming())
         && incoming().reporterId == request.auth.uid
@@ -1081,16 +1094,16 @@ service cloud.firestore {
 
     // --- Real-Time Admin <-> Restaurant Owner Conversations ---
     match /adminConversations/{conversationId} {
-      allow get: if isValidId(conversationId) && isVerifiedUser() && (
+      allow get: if isValidId(conversationId) && isAuthUser() && (
         conversationId == 'admin_' + request.auth.uid ||
         (resource != null && existing().ownerUid == request.auth.uid) ||
         isAdmin()
       );
-      allow list: if isVerifiedUser() && (
+      allow list: if isAuthUser() && (
         resource.data.ownerUid == request.auth.uid || isAdmin()
       );
       allow create: if isValidId(conversationId)
-        && isVerifiedUser()
+        && isAuthUser()
         && isValidAdminConversation(incoming())
         && incoming().createdAt == request.time
         && incoming().updatedAt == request.time
@@ -1102,7 +1115,7 @@ service cloud.firestore {
           )
         );
       allow update: if isValidId(conversationId)
-        && isVerifiedUser()
+        && isAuthUser()
         && isValidAdminConversation(incoming())
         && incoming().ownerUid == existing().ownerUid
         && incoming().createdAt == existing().createdAt
@@ -1124,7 +1137,7 @@ service cloud.firestore {
         allow get: if isValidId(conversationId) && isValidId(messageId) && (
           isAdminConvParticipant(conversationId) || isAdmin()
         );
-        allow list: if isVerifiedUser() && (
+        allow list: if isAuthUser() && (
           resource.data.ownerUid == request.auth.uid || isAdmin()
         );
         allow create: if isValidId(conversationId)
@@ -1328,7 +1341,7 @@ service cloud.firestore {
 
     // --- Messenger Real 1-to-1 & Pickup Coordination Conversations ---
     match /conversations/{conversationId} {
-      allow get: if isValidId(conversationId) && isVerifiedUser() && (
+      allow get: if isValidId(conversationId) && isAuthUser() && (
         (resource == null && conversationId.split('_').hasAny([request.auth.uid])) ||
         (resource != null && (
           request.auth.uid in existing().participants ||
@@ -1337,13 +1350,13 @@ service cloud.firestore {
           isAdmin()
         ))
       );
-      allow list: if isVerifiedUser() && (
+      allow list: if isAuthUser() && (
         request.auth.uid in resource.data.participants ||
         ('donorId' in resource.data && resource.data.donorId == request.auth.uid) ||
         ('recipientId' in resource.data && resource.data.recipientId == request.auth.uid) ||
         isAdmin()
       );
-      allow create: if isVerifiedUser()
+      allow create: if isAuthUser()
         && isValidId(conversationId)
         && isValidChatConversation(incoming())
         && request.auth.uid in incoming().participants
@@ -1355,7 +1368,7 @@ service cloud.firestore {
         && incoming().uidB in incoming().participants
         && incoming().uidA != incoming().uidB
         && !isBlockedBetween(incoming().uidA, incoming().uidB);
-      allow update: if isVerifiedUser()
+      allow update: if isAuthUser()
         && isValidId(conversationId)
         && isValidChatConversation(incoming())
         && incoming().uidA == existing().uidA
@@ -1379,7 +1392,7 @@ service cloud.firestore {
         );
       allow delete: if isValidId(conversationId) && (
         isAdmin() || (
-          isVerifiedUser()
+          isAuthUser()
           && 'isDemo' in existing()
           && existing().isDemo == true
           && 'demoOwnerUid' in existing()
@@ -1391,7 +1404,7 @@ service cloud.firestore {
         allow get: if isValidId(conversationId) && isValidId(messageId) && (
           isConversationParticipant(conversationId) || isAdmin()
         );
-        allow list: if isVerifiedUser() && (
+        allow list: if isAuthUser() && (
           request.auth.uid in resource.data.participants ||
           ('donorId' in resource.data && resource.data.donorId == request.auth.uid) ||
           ('recipientId' in resource.data && resource.data.recipientId == request.auth.uid) ||
@@ -1432,7 +1445,7 @@ service cloud.firestore {
           ]);
         allow delete: if isValidId(conversationId) && isValidId(messageId) && (
           isAdmin() || (
-            isVerifiedUser()
+            isAuthUser()
             && 'isDemo' in get(/databases/$(database)/documents/conversations/$(conversationId)).data
             && get(/databases/$(database)/documents/conversations/$(conversationId)).data.isDemo == true
             && get(/databases/$(database)/documents/conversations/$(conversationId)).data.demoOwnerUid == request.auth.uid

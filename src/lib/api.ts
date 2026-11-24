@@ -119,7 +119,7 @@ export async function getAuthToken(forceRefresh = false): Promise<{ token: strin
     return { token: stored, isFirebase: false };
   }
   const fbUser = auth.currentUser;
-  if (fbUser && fbUser.emailVerified) {
+  if (fbUser) {
     try {
       const idToken = await fbUser.getIdToken(forceRefresh);
       return { token: `fb:${idToken}`, isFirebase: true };

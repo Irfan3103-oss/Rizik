@@ -909,11 +909,11 @@ export default function App() {
   );
 
   const mergedNotifications = useMemo(() => {
-    if (isFirebaseSession && isFirebaseVerified) {
+    if (isFirebaseSession) {
       return firestoreNotifications;
     }
     return notifications;
-  }, [isFirebaseSession, isFirebaseVerified, firestoreNotifications, notifications]);
+  }, [isFirebaseSession, firestoreNotifications, notifications]);
 
   // Resolve `/inbox/:shopId` param against admin_, room_, conversation ID, peerUid, or donorId once conversations load
   const resolvedSelectedConvId = useMemo(() => {
@@ -965,7 +965,7 @@ export default function App() {
 
   const loadUserWorkspaceData = useCallback(async () => {
     if (!user) return;
-    if (isFirebaseSession && !isFirebaseVerified) return;
+    if (isFirebaseSession && !firebaseUser) return;
     try {
       const [convRes, notifRes] = await Promise.all([
         api.getConversations(),
@@ -996,7 +996,7 @@ export default function App() {
     } catch {
       // Offline resilient
     }
-  }, [user, isFirebaseSession, isFirebaseVerified, coords.lat, coords.lng]);
+  }, [user, isFirebaseSession, firebaseUser, coords.lat, coords.lng]);
 
   // Keep latest loaders in refs so WebSocket effect never reconnects on callback identity changes
   const loadFeedRef = useRef(loadFeed);
@@ -1012,12 +1012,12 @@ export default function App() {
     loadFeed();
   }, [loadHomeSummary, loadFeed, user?.id]);
 
-  // Load private workspace data for authenticated Express & verified Firebase sessions
+  // Load private workspace data for authenticated Express & Firebase sessions
   useEffect(() => {
     if (!user) return;
-    if (isFirebaseSession && !isFirebaseVerified) return;
+    if (isFirebaseSession && !firebaseUser) return;
     loadUserWorkspaceData();
-  }, [user, isFirebaseSession, isFirebaseVerified, loadUserWorkspaceData]);
+  }, [user, isFirebaseSession, firebaseUser, loadUserWorkspaceData]);
 
   // Attach Firestore real-time listeners ONLY when Firebase auth is ready and a user is signed in
   useEffect(() => {
@@ -1059,10 +1059,11 @@ export default function App() {
     const unsubs: (() => void)[] = [];
     unsubs.push(subscribeActiveFirestoreListings(setFirestoreListings));
 
-    if (isFirebaseVerified && user?.id === firebaseUser.uid) {
+    if (user?.id === firebaseUser.uid) {
       setQueuedMessengerMessages(readOfflineMessageQueue(firebaseUser.uid));
 
-      // Self-healing ensureAccount runs once per verified login/app-start + real-time presence
+      // Self-healing ensureAccount runs once per login/app-start + real-time presence
+      // Run for all signed-in users (verified or not) so they appear in the directory
       if (ensuredSessionUidRef.current !== firebaseUser.uid) {
         ensuredSessionUidRef.current = firebaseUser.uid;
         void ensureAccount(firebaseUser, user).then((rep) => {
@@ -1184,11 +1185,11 @@ export default function App() {
         unsub();
       }
     };
-  }, [firebaseAuthReady, firebaseUser, isFirebaseVerified, isAdmin, user?.id, user?.role]);
+  }, [firebaseAuthReady, firebaseUser, isAdmin, user?.id, user?.role]);
 
   // Paginated Zero-PII People Directory subscription
   useEffect(() => {
-    if (!(firebaseAuthReady && firebaseUser && isFirebaseVerified)) {
+    if (!(firebaseAuthReady && firebaseUser)) {
       setDirectoryEntries([]);
       setDirectoryHasMore(false);
       setDirectoryError(null);
@@ -1207,7 +1208,7 @@ export default function App() {
         setDirectoryError(err);
       }
     );
-  }, [firebaseAuthReady, firebaseUser, isFirebaseVerified, directoryLimit]);
+  }, [firebaseAuthReady, firebaseUser, directoryLimit]);
 
   // Reset message page size & listener error when switching active thread or community room
   useEffect(() => {
@@ -1225,7 +1226,6 @@ export default function App() {
       !(
         firebaseAuthReady &&
         firebaseUser &&
-        isFirebaseVerified &&
         user?.id === firebaseUser.uid &&
         resolvedSelectedConvId?.startsWith('room_')
       )
@@ -1270,7 +1270,6 @@ export default function App() {
   }, [
     firebaseAuthReady,
     firebaseUser,
-    isFirebaseVerified,
     user?.id,
     resolvedSelectedConvId,
     roomMsgPageSize,
@@ -1287,7 +1286,7 @@ export default function App() {
 
   // Real-time paginated messages listener + delivered/read receipt syncing (isolated for demo chats)
   useEffect(() => {
-    if (!(firebaseAuthReady && firebaseUser && isFirebaseVerified && activeFirestoreConv)) {
+    if (!(firebaseAuthReady && firebaseUser && activeFirestoreConv)) {
       setFirestoreMessages([]);
       setHasMoreMessages(false);
       setLoadingMoreMessages(false);
@@ -1339,7 +1338,6 @@ export default function App() {
   }, [
     firebaseAuthReady,
     firebaseUser,
-    isFirebaseVerified,
     activeFirestoreConv?.id,
     activeFirestoreConv?.isDemo,
     activeFirestoreConv?.peerUid,
@@ -1349,7 +1347,7 @@ export default function App() {
 
   // Mark unread incoming Firestore messages as delivered whenever user is online
   useEffect(() => {
-    if (!(firebaseAuthReady && firebaseUser && isFirebaseVerified && isOnline)) return;
+    if (!(firebaseAuthReady && firebaseUser && isOnline)) return;
     const unreadConvs = firestoreConversations.filter(
       (c) =>
         !c.isDemo &&
@@ -1364,7 +1362,6 @@ export default function App() {
   }, [
     firebaseAuthReady,
     firebaseUser,
-    isFirebaseVerified,
     isOnline,
     firestoreConversations,
     activeFirestoreConv?.id,
@@ -1398,9 +1395,9 @@ export default function App() {
     return [...filteredFs, ...listings];
   }, [firestoreListings, listings, filters, searchQuery]);
 
-  // Stabilized WebSocket Lifecycle (supports both Express and verified Firebase sessions)
+  // Stabilized WebSocket Lifecycle (supports both Express and Firebase sessions)
   useEffect(() => {
-    if (!user?.id || (isFirebaseSession && !isFirebaseVerified)) {
+    if (!user?.id || (isFirebaseSession && !firebaseUser)) {
       setWsSocket(null);
       setWsStatus(isOnline ? 'connecting' : 'offline');
       return;
@@ -1554,7 +1551,7 @@ export default function App() {
       clearTimers();
       ws?.close();
     };
-  }, [user?.id, isOnline, isFirebaseSession, isFirebaseVerified]);
+  }, [user?.id, isOnline, isFirebaseSession, firebaseUser]);
 
   const openAuthPage = useCallback(
     (mode: AuthMode, explicitAction?: PendingAuthAction, initialRole?: 'recipient' | 'donor') => {
@@ -1624,7 +1621,7 @@ export default function App() {
           if (action.donorId) {
             try {
               if (session.token === '__firebase__') {
-                if (auth.currentUser?.emailVerified) {
+                if (auth.currentUser) {
                   const match = freshListings.find((l) => l.id === action.listingId) ?? null;
                   const convId = await openDirectChatForListingOrShop(
                     session.user,
@@ -1922,7 +1919,7 @@ export default function App() {
   const handleSelectDirectoryPerson = useCallback(
     async (entry: UserDirectoryEntry) => {
       if (!user) return;
-      if (isFirebaseSession && isFirebaseVerified) {
+      if (isFirebaseSession) {
         try {
           const isDemoTarget = Boolean(entry.isDemo || entry.uid.startsWith('demo_'));
           const convId = isDemoTarget
@@ -1948,7 +1945,7 @@ export default function App() {
       await loadUserWorkspaceData();
       navigateTo('chat', { convId: res.conversationId });
     },
-    [user, isFirebaseSession, isFirebaseVerified, navigateTo, loadUserWorkspaceData, t]
+    [user, isFirebaseSession, navigateTo, loadUserWorkspaceData, t]
   );
 
   const scheduleDemoAutoReply = useCallback(
@@ -2174,7 +2171,7 @@ export default function App() {
 
   // Auto-flush queued Firestore messages when back online
   useEffect(() => {
-    if (!isOnline || !isFirebaseVerified || !user?.id || queuedMessengerMessages.length === 0) return;
+    if (!isOnline || !user?.id || queuedMessengerMessages.length === 0) return;
     let cancelled = false;
     void (async () => {
       const remaining: QueuedMessengerMessage[] = [];
@@ -2241,7 +2238,6 @@ export default function App() {
     };
   }, [
     isOnline,
-    isFirebaseVerified,
     user?.id,
     queuedMessengerMessages.length,
     mergedConversations,
@@ -2251,7 +2247,7 @@ export default function App() {
   const handleStartDirectChat = useCallback(
     async (targetUser: PlatformUserSummary) => {
       if (!user) return;
-      if (isFirebaseSession && isFirebaseVerified) {
+      if (isFirebaseSession) {
         await handleSelectDirectoryPerson({
           uid: targetUser.id,
           displayName: targetUser.name,
@@ -2289,7 +2285,7 @@ export default function App() {
         navigateTo('chat', { convId: res.conversationId });
       }
     },
-    [user, isAdmin, isFirebaseSession, isFirebaseVerified, handleSelectDirectoryPerson, loadUserWorkspaceData, navigateTo, t]
+    [user, isAdmin, isFirebaseSession, handleSelectDirectoryPerson, loadUserWorkspaceData, navigateTo, t]
   );
 
   if (authBooting) {
@@ -3737,7 +3733,7 @@ export default function App() {
                   })
                 }
                 onStartDirectChat={user ? handleStartDirectChat : undefined}
-                communityRooms={isFirebaseSession && isFirebaseVerified ? communityRooms : []}
+                communityRooms={isFirebaseSession ? communityRooms : []}
                 roomMessages={roomMessages}
                 roomMembers={roomMembers}
                 roomHasMore={roomHasMore}
@@ -3783,7 +3779,7 @@ export default function App() {
                 roomsError={roomsError}
                 roomMessagesError={roomMessagesError}
                 directoryError={directoryError}
-                unverifiedEmailNotice={isFirebaseSession && !isFirebaseVerified}
+                unverifiedEmailNotice={false}
                 onOpenSettings={() => navigateTo('settings')}
                 onRunHealthCheck={() =>
                   setHealthCheckModal({ open: true, mode: isAdmin ? 'admin' : 'user' })
