@@ -9,6 +9,7 @@ import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
 import {
   db,
+  DATA_DIR,
   initDatabase,
   generateId,
   generatePickupCode,
@@ -33,9 +34,9 @@ const FIREBASE_PROJECT_ID = (() => {
 const AUTHORITATIVE_ADMIN_EMAIL = 'jafor05101007@student.ndub.edu.bd';
 const BLOCKED_ADMIN_EMAIL = 'sheikhsahel513@gmail.com';
 
-const PORT = 3000;
+const PORT = Number(process.env.PORT) || 3000;
 const DAILY_CLAIM_LIMIT = 3;
-const UPLOADS_DIR = path.resolve(process.cwd(), 'uploads');
+const UPLOADS_DIR = path.join(DATA_DIR, 'uploads');
 if (!fs.existsSync(UPLOADS_DIR)) {
   fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 }

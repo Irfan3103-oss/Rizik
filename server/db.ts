@@ -3,8 +3,13 @@ import crypto from 'node:crypto';
 import fs from 'fs';
 import path from 'path';
 
-const LEGACY_DB_PATH = path.resolve(process.cwd(), 'nourishloop.db');
-const DB_PATH = path.resolve(process.cwd(), 'aharforall.db');
+// DATA_DIR holds the SQLite DB and uploads; point it at a persistent volume when hosted.
+export const DATA_DIR = path.resolve(process.env.DATA_DIR || process.cwd());
+if (!fs.existsSync(DATA_DIR)) {
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+}
+const LEGACY_DB_PATH = path.join(DATA_DIR, 'nourishloop.db');
+const DB_PATH = path.join(DATA_DIR, 'aharforall.db');
 
 if (fs.existsSync(LEGACY_DB_PATH) && !fs.existsSync(DB_PATH)) {
   fs.renameSync(LEGACY_DB_PATH, DB_PATH);
