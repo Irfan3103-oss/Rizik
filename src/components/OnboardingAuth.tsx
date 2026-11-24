@@ -460,8 +460,8 @@ export function OnboardingAuth({
     try {
       const res = await api.forgotPassword(identifier.trim());
       setResetSent(true);
-      setDevOtpHint(res.devOtpHint);
-      setResetCode(res.devOtpHint);
+      setDevOtpHint(res.devOtpHint ?? null);
+      setResetCode(res.devOtpHint ?? '');
     } catch (err) {
       setError(err instanceof Error ? err.message : t('onboarding.sendCodeError'));
     } finally {

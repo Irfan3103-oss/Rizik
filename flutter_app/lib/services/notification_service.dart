@@ -324,7 +324,7 @@ class NotificationService {
             'LIST',
             'users/$safeUid/notifications',
           );
-          onError?.(parsed);
+          onError?.call(parsed);
           if (!controller.isClosed) controller.addError(parsed, st);
         },
       );
@@ -356,7 +356,7 @@ class NotificationService {
               attachFallback();
               return;
             }
-            onError?.(parsed);
+            onError?.call(parsed);
             if (!controller.isClosed) controller.addError(parsed, st);
           },
         );

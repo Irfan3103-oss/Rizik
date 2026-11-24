@@ -9,6 +9,7 @@ import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
 import {
   db,
+  DATA_DIR,
   initDatabase,
   generateId,
   generatePickupCode,
@@ -16,6 +17,7 @@ import {
   verifyPassword,
   haversineKm,
   runAutoExpirySweep,
+  refreshDemoListingsIfEmpty,
 } from './server/db.ts';
 import type { ClaimStatus, FoodCategory, ListingStatus, User, VolunteerRole } from './src/types.ts';
 
@@ -33,9 +35,10 @@ const FIREBASE_PROJECT_ID = (() => {
 const AUTHORITATIVE_ADMIN_EMAIL = 'jafor05101007@student.ndub.edu.bd';
 const BLOCKED_ADMIN_EMAIL = 'sheikhsahel513@gmail.com';
 
-const PORT = 3000;
+const PORT = Number(process.env.PORT) || 3000;
 const DAILY_CLAIM_LIMIT = 3;
-const UPLOADS_DIR = path.resolve(process.cwd(), 'uploads');
+const EXPOSE_DEV_OTP = process.env.EXPOSE_DEV_OTP === 'true';
+const UPLOADS_DIR = path.join(DATA_DIR, 'uploads');
 if (!fs.existsSync(UPLOADS_DIR)) {
   fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 }
@@ -174,7 +177,6 @@ async function verifyFirebaseIdToken(idToken: string): Promise<User | null> {
       typeof payload.iat !== 'number' ||
       payload.iat > nowSec + 300 ||
       (typeof payload.auth_time === 'number' && payload.auth_time > nowSec + 300) ||
-      payload.email_verified !== true ||
       typeof payload.email !== 'string' ||
       !payload.email.trim()
     ) {
@@ -423,6 +425,7 @@ async function startServer() {
   // Periodic background sweep every 30s to expire old listings & no-shows
   setInterval(() => {
     const expiredIds = runAutoExpirySweep();
+    if (process.env.DEMO_MODE === 'true') refreshDemoListingsIfEmpty();
     if (expiredIds.length > 0) {
       for (const sockets of wsClients.values()) {
         const msg = JSON.stringify({ event: 'listing:expired', data: { listingIds: expiredIds } });
@@ -602,7 +605,7 @@ async function startServer() {
        ON CONFLICT(identifier) DO UPDATE SET code = excluded.code, expires_at = excluded.expires_at`
     ).run(identifier, code, expiresAt);
 
-    res.json({ message: 'Verification code sent.', devOtpHint: code });
+    res.json({ message: 'Verification code sent.', ...(EXPOSE_DEV_OTP ? { devOtpHint: code } : {}) });
   });
 
   app.post('/api/auth/reset-password', (req, res) => {
@@ -659,10 +662,11 @@ async function startServer() {
        ON CONFLICT(identifier) DO UPDATE SET code = excluded.code, expires_at = excluded.expires_at`
     ).run(identifier, code, expiresAt);
 
-    // Expose devOtpHint so evaluators can complete OTP verification seamlessly without SMS/email delivery
+    // devOtpHint lets evaluators finish OTP without SMS/email delivery. Only when EXPOSE_DEV_OTP=true:
+    // anyone who knows an email/phone could otherwise take over that account.
     res.json({
       message: 'Verification code sent.',
-      devOtpHint: code,
+      ...(EXPOSE_DEV_OTP ? { devOtpHint: code } : {}),
     });
   });
 

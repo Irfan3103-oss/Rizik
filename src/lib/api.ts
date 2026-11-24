@@ -119,7 +119,7 @@ export async function getAuthToken(forceRefresh = false): Promise<{ token: strin
     return { token: stored, isFirebase: false };
   }
   const fbUser = auth.currentUser;
-  if (fbUser && fbUser.emailVerified) {
+  if (fbUser) {
     try {
       const idToken = await fbUser.getIdToken(forceRefresh);
       return { token: `fb:${idToken}`, isFirebase: true };
@@ -185,7 +185,7 @@ export const api = {
     }),
 
   forgotPassword: (identifier: string) =>
-    request<{ message: string; devOtpHint: string }>('/api/auth/forgot-password', {
+    request<{ message: string; devOtpHint?: string }>('/api/auth/forgot-password', {
       method: 'POST',
       body: JSON.stringify({ identifier }),
     }),
@@ -199,7 +199,7 @@ export const api = {
   logout: () => request<{ ok: boolean }>('/api/auth/logout', { method: 'POST' }),
 
   requestOtp: (identifier: string) =>
-    request<{ message: string; devOtpHint: string }>('/api/auth/request-otp', {
+    request<{ message: string; devOtpHint?: string }>('/api/auth/request-otp', {
       method: 'POST',
       body: JSON.stringify({ identifier }),
     }),

@@ -415,7 +415,7 @@ class MessengerService {
       return DirectoryPageResult(list, snap.docs.length >= effLimit);
     }).handleError((e) {
       final parsed = parseFirestoreListenerError(e, 'LIST', 'userDirectory');
-      onError?.(parsed);
+      onError?.call(parsed);
       throw parsed;
     });
   }
@@ -444,7 +444,7 @@ class MessengerService {
     }).handleError((e) {
       final parsed =
           parseFirestoreListenerError(e, 'LIST', 'users/$safeUid/blocked');
-      onError?.(parsed);
+      onError?.call(parsed);
       throw parsed;
     });
   }
@@ -899,7 +899,7 @@ class MessengerService {
         'LIST',
         'users/$safeUid/demoConversations',
       );
-      onError?.(parsed);
+      onError?.call(parsed);
       throw parsed;
     });
   }
@@ -1085,7 +1085,7 @@ class MessengerService {
           onError: (e, st) {
             final parsed =
                 parseFirestoreListenerError(e, 'LIST', 'conversations');
-            onError?.(parsed);
+            onError?.call(parsed);
             if (!controller.isClosed) controller.addError(parsed, st);
           },
         );
@@ -1436,7 +1436,7 @@ class MessengerService {
           'LIST',
           'users/$safeMyUid/demoMessages',
         );
-        onError?.(parsed);
+        onError?.call(parsed);
         throw parsed;
       });
     }
@@ -1491,7 +1491,7 @@ class MessengerService {
                 'LIST',
                 'conversations/$safeConvId/messages',
               );
-              onError?.(parsed);
+              onError?.call(parsed);
               if (!controller.isClosed) controller.addError(parsed, st);
             },
           );
@@ -1519,7 +1519,7 @@ class MessengerService {
                   attachFallback();
                   return;
                 }
-                onError?.(parsed);
+                onError?.call(parsed);
                 if (!controller.isClosed) controller.addError(parsed, st);
               },
             );
@@ -1604,7 +1604,7 @@ class MessengerService {
     final safeUid = _sanitizeId(myUid);
     final convId = _sanitizeId(conversation.id);
     final spec = _buildPersonaSpecFromConversation(conversation);
-    final replyText = generatePersonaAutoReply(spec, userText, lang: lang);
+    final replyText = generatePersonaAutoReply(spec, userText, lang);
 
     final rand = _rng.nextInt(9000) + 1000;
     final replyId = _sanitizeId(
