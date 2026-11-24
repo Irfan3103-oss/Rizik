@@ -19,6 +19,11 @@ class ApiService {
   static const String _feedCacheKey = 'aharforall_feed_cache';
 
   WebSocketChannel? _ws;
+  // Reconnect/keepalive state: hosted servers and mobile networks drop idle sockets.
+  bool _wsWanted = false;
+  int _wsAttempt = 0;
+  Timer? _wsReconnectTimer;
+  Timer? _wsPingTimer;
   final StreamController<Map<String, dynamic>> _wsEvents =
       StreamController<Map<String, dynamic>>.broadcast();
   Stream<Map<String, dynamic>> get wsEvents => _wsEvents.stream;
@@ -100,27 +105,70 @@ class ApiService {
 
   // --- WebSocket ---
   Future<void> connectWebSocket() async {
+    _wsWanted = true;
+    _wsReconnectTimer?.cancel();
     final token = await getAuthBearerToken();
-    if (token == null) return;
-    await disconnectWebSocket();
+    if (token == null) {
+      _wsWanted = false;
+      return;
+    }
+    await _closeWebSocket();
+    // A concurrent connect may have opened a socket while we awaited; drop it.
+    _wsPingTimer?.cancel();
+    _ws?.sink.close();
     final wsBase = baseUrl.replaceFirst('https://', 'wss://').replaceFirst('http://', 'ws://');
     final uri = Uri.parse('$wsBase/ws?token=${Uri.encodeComponent(token)}');
-    _ws = WebSocketChannel.connect(uri);
-    _ws!.stream.listen(
+    final channel = WebSocketChannel.connect(uri);
+    _ws = channel;
+    channel.stream.listen(
       (raw) {
+        _wsAttempt = 0; // server answered: reset backoff
         try {
           final map = jsonDecode(raw.toString()) as Map<String, dynamic>;
           _wsEvents.add(map);
         } catch (_) {}
       },
-      onError: (_) {},
-      onDone: () {},
+      onError: (_) => _onWebSocketClosed(channel),
+      onDone: () => _onWebSocketClosed(channel),
+      cancelOnError: true,
     );
+    // The server answers {"event":"ping"} with pong; the web client pings every 25 s.
+    _wsPingTimer = Timer.periodic(const Duration(seconds: 25), (_) {
+      try {
+        channel.sink.add(jsonEncode({'event': 'ping'}));
+      } catch (_) {}
+    });
+  }
+
+  void _onWebSocketClosed(WebSocketChannel channel) {
+    if (!identical(channel, _ws)) return; // an older socket we already replaced
+    _wsPingTimer?.cancel();
+    _wsPingTimer = null;
+    _ws = null;
+    if (!_wsWanted) return;
+    // Backoff 1s, 2s, 4s... capped at 30s.
+    final delaySec = (1 << _wsAttempt.clamp(0, 5)).clamp(1, 30);
+    _wsAttempt++;
+    _wsReconnectTimer?.cancel();
+    _wsReconnectTimer = Timer(Duration(seconds: delaySec), () {
+      if (_wsWanted) connectWebSocket();
+    });
+  }
+
+  Future<void> _closeWebSocket() async {
+    _wsPingTimer?.cancel();
+    _wsPingTimer = null;
+    final old = _ws;
+    _ws = null;
+    await old?.sink.close();
   }
 
   Future<void> disconnectWebSocket() async {
-    await _ws?.sink.close();
-    _ws = null;
+    _wsWanted = false;
+    _wsAttempt = 0;
+    _wsReconnectTimer?.cancel();
+    _wsReconnectTimer = null;
+    await _closeWebSocket();
   }
 
   void sendTyping(String conversationId, bool isTyping) {

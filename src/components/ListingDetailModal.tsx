@@ -197,8 +197,8 @@ export function ListingDetailModal({
           onClaimCreated('');
           return;
         }
-        setError(t('detail.unableToClaim'));
-        return;
+        // Listing lives in SQLite (e.g. seeded demo food): fall through to the Express API,
+        // which accepts the Firebase token.
       }
       const res = await api.createClaim(listing.id, quantity, notes || undefined);
       onClaimCreated(res.conversationId);
