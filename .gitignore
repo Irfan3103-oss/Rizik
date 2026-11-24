@@ -6,3 +6,11 @@ coverage/
 *.log
 .env*
 !.env.example
+dev-dist/
+*.db
+*.db-wal
+*.db-shm
+uploads/
+flutter_app/build/
+flutter_app/.dart_tool/
+tmp-data/
