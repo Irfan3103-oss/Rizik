@@ -56,6 +56,13 @@ class _ChatScreenState extends State<ChatScreen> {
 
   Conversation? _selected;
   List<ChatMessage> _messages = [];
+
+  // The server echoes our own sent message over the WebSocket as well as in the
+  // send response, so add by id only once.
+  void _addMessageOnce(ChatMessage m) {
+    if (_messages.any((x) => x.id == m.id)) return;
+    _messages.add(m);
+  }
   List<ChatMessage> _optimisticPending = [];
   bool _hasOlderMessages = false;
   int _messagePageSize = 30;
@@ -106,7 +113,7 @@ class _ChatScreenState extends State<ChatScreen> {
         if (_selected?.id == m.conversationId &&
             _selected?.isFirestoreBacked != true &&
             mounted) {
-          setState(() => _messages.add(m));
+          setState(() => _addMessageOnce(m));
           _scrollToBottom();
         }
         _loadExpressConvs();
@@ -583,7 +590,7 @@ class _ChatScreenState extends State<ChatScreen> {
       if (mounted) {
         setState(() {
           _replyingTo = null;
-          _messages.add(sent);
+          _addMessageOnce(sent);
         });
         _scrollToBottom();
       }
@@ -624,7 +631,7 @@ class _ChatScreenState extends State<ChatScreen> {
         'imageUrl': url,
       });
       if (mounted) {
-        setState(() => _messages.add(sent));
+        setState(() => _addMessageOnce(sent));
         _scrollToBottom();
       }
     }
@@ -654,7 +661,7 @@ class _ChatScreenState extends State<ChatScreen> {
         'locationLabel': 'Dhaka Meetup Pin',
       });
       if (mounted) {
-        setState(() => _messages.add(sent));
+        setState(() => _addMessageOnce(sent));
         _scrollToBottom();
       }
     }
